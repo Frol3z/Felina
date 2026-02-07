@@ -126,12 +126,14 @@ namespace Felina
 				m_hierarchySelection->SetScale(m_displayedScale);
 			}
 
+			// TODO: this code should be readapted to maybe listing all the loaded resources
 			// Mesh
 			auto& rm = ResourceManager::GetInstance();
-			MeshID selectedMesh = m_hierarchySelection->GetMesh();
-			if (selectedMesh != MeshID(-1))
+			const std::vector<MeshID>& meshes = m_hierarchySelection->GetMeshes();
+
+			if(meshes.size())
 			{
-				if (ImGui::BeginCombo("Mesh", rm.GetMeshName(selectedMesh).c_str(), 0))
+				if (ImGui::BeginCombo("Mesh", rm.GetMeshName(meshes[0]).c_str(), 0))
 				{
 					static ImGuiTextFilter filter;
 					if (ImGui::IsWindowAppearing())
@@ -142,17 +144,19 @@ namespace Felina
 					ImGui::SetNextItemShortcut(ImGuiMod_Ctrl | ImGuiKey_F);
 					filter.Draw("##Filter", -FLT_MIN);
 
-					for (auto& [id, mesh] : rm.GetMeshes())
+					for (MeshID meshId : meshes)
 					{
-						auto& name = rm.GetMeshName(id);
-						const bool isSelected = (id == selectedMesh);
+						if (meshId == meshes[0])
+							continue;
+
+						auto& name = rm.GetMeshName(meshId);
 						if (filter.PassFilter(name.c_str()))
-							if (ImGui::Selectable(name.c_str(), isSelected))
-								m_hierarchySelection->SetMesh(id);
+							ImGui::Selectable(name.c_str(), false);
 					}
 					ImGui::EndCombo();
 				}
-
+				
+				/*
 				// Material
 				MaterialID selectedMaterial = m_hierarchySelection->GetMaterial();
 				if (ImGui::BeginCombo("Material", rm.GetMaterialName(selectedMaterial).c_str(), 0))
@@ -176,6 +180,7 @@ namespace Felina
 					}
 					ImGui::EndCombo();
 				}
+				*/
 			}
 		}
 		ImGui::End();

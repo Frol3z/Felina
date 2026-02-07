@@ -9,7 +9,6 @@
 #include "Buffer.hpp"
 #include "Texture.hpp"
 #include "GBuffer.hpp"
-#include "Common.hpp"
 #include "PipelineBuilder.hpp"
 #include "ResourceManager.hpp"
 
@@ -266,8 +265,6 @@ namespace Felina
            const auto& textures = rm.GetTextures();
            std::array<vk::DescriptorImageInfo, MAX_TEXTURES> imageInfos;
            vk::DescriptorImageInfo skyboxInfo; // Skybox doesn't count in MAX_TEXTURES
-
-           assert(textures.size() < (MAX_TEXTURES + 1) && "[Renderer] Loaded textures surpass MAX_TEXTURES!");
            size_t i = 0;
            for (const auto& [id, resource] : textures)
            {
@@ -424,7 +421,7 @@ namespace Felina
     {
         // Add current object data
         glm::mat4 modelMatrix = parentModelMatrix * obj.GetModelMatrix();
-        if (obj.GetMesh() != MeshID(-1))
+        if (obj.GetMeshes().size())
         {
             objectDatas.emplace_back(Renderer::ObjectData{
                 .model = modelMatrix,
@@ -721,7 +718,7 @@ namespace Felina
         PipelineBuilder pipelineBuilder{ *m_device };
         pipelineBuilder.EnableVertexInput();
         pipelineBuilder.EnableDepthTest();
-        pipelineBuilder.EnableBackfaceCulling();
+        pipelineBuilder.DisableBackfaceCulling();
         std::vector<PipelineBuilder::ShaderStageInfo> geomShaderStages{
             {"./shaders/geometry_pass.vert.spv", vk::ShaderStageFlagBits::eVertex},
             {"./shaders/geometry_pass.frag.spv", vk::ShaderStageFlagBits::eFragment}
@@ -947,14 +944,19 @@ namespace Felina
     void Renderer::DrawObject(const Object& obj, uint32_t& idx)
     {
         // TODO: improve invalid ResourceIDs handling
-        // Skip drawing if the object has no mesh
-        if (obj.GetMesh() != MeshID(-1))
+
+        // Iterate through all the meshes associated with obj
+        // NOTE: this loop will be skipped if the object has no mesh
+        for (MeshID meshId : obj.GetMeshes())
         {
-            // Draw the object
-            // Update push const
+            const Mesh& mesh = ResourceManager::GetInstance().GetMesh(meshId);
+
+            // NOTE:
+            // .objectIndex is per-object
+            // .materialIndex is per-mesh
             ObjectPushConst pc{
                 .objectIndex = idx,
-                .materialIndex = m_materialIDToSSBOID[m_currentFrame][obj.GetMaterial()]
+                .materialIndex = m_materialIDToSSBOID[m_currentFrame][mesh.GetMaterial()]
             };
             m_commandBuffers[m_currentFrame].pushConstants(
                 *m_defGeometryPipelineLayout,
@@ -964,16 +966,16 @@ namespace Felina
             );
 
             // Bind vertex and index buffer
-            auto& mesh = ResourceManager::GetInstance().GetMesh(obj.GetMesh());
             m_commandBuffers[m_currentFrame].bindVertexBuffers(0, mesh.GetVertexBuffer().GetHandle(), { 0 });
             m_commandBuffers[m_currentFrame].bindIndexBuffer(mesh.GetIndexBuffer().GetHandle(), 0, mesh.GetIndexType());
 
             // Draw call
             m_commandBuffers[m_currentFrame].drawIndexed(mesh.GetIndexBufferSize(), 1, 0, 0, 0);
-
-            // Increment index AFTER drawing the object
-            ++idx;
         }
+
+        // Increment index AFTER drawing the object
+        if (obj.GetMeshes().size())
+            ++idx;
 
         // Iterate through its children
         for (const auto& childPtr : obj.GetChildren())

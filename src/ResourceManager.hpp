@@ -30,6 +30,9 @@ namespace Felina
 				return instance;
 			}
 
+			inline void SetDefaultMaterial(MaterialID mat) { m_defaultMaterial = mat; };
+			inline MaterialID GetDefaultMaterial() const { return m_defaultMaterial; };
+
 			MeshID LoadMesh(std::unique_ptr<Mesh> mesh, const std::string& name, Renderer& renderer);
 			MaterialID LoadMaterial(std::unique_ptr<Material> material, const std::string& name);
 			TextureID LoadTexture(std::unique_ptr<Texture> texture, const std::string& name,
@@ -52,6 +55,7 @@ namespace Felina
 			std::unordered_map<MeshID, Resource<Mesh>> m_meshes;
 			std::unordered_map<MaterialID, Resource<Material>> m_materials;
 			std::unordered_map<TextureID, Resource<Texture>> m_textures;
+			MaterialID m_defaultMaterial{ 0 };
 
 			// Id counters
 			MeshID m_meshID{ 0 };
