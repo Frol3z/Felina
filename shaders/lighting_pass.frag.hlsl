@@ -1,4 +1,4 @@
-#define MAX_TEXTURES 10 // must match the one in Renderer.hpp
+#define MAX_TEXTURES 136 // must match the one in Renderer.hpp
 #define MAX_SAMPLERS 2
 #define PI 3.14159265358979323846
 
@@ -56,10 +56,10 @@ static const float3 LIGHT_COL = float3(1.0, 1.0, 1.0);
 
 float3 reconstructWorldPosition(float depth, float2 uv)
 {
-    float2 ndc = uv * 2.0 - 1.0; // Convert [0, 1] to [-1, 1]
+    float2 ndc = uv * 2.0 - 1.0; // convert [0, 1] to [-1, 1]
     float4 clipPos = float4(ndc.x, ndc.y, depth, 1.0);
-    float4 worldPosH = mul(cameraData.invViewProj, clipPos); // Clip to world-space
-    return (worldPosH.xyz / worldPosH.w); // De-homogenization
+    float4 worldPosH = mul(cameraData.invViewProj, clipPos); // clip to world-space
+    return (worldPosH.xyz / worldPosH.w); // de-homogenization
 }
 
 // Metalness-weighted Lambertian diffuse BRDF
@@ -105,11 +105,16 @@ float D(float alphaSquared, float nDotH)
 // Note that returned value is G2 / (4 * NdotL * NdotV) and therefore includes division by specular BRDF denominator
 // 
 // REFERENCE: https://boksajak.github.io/files/CrashCourseBRDF.pdf
-float G(float alphaSquared, float nDotL, float nDotV)
+// Improved numerical stability
+float G(float alpha2, float NdotL, float NdotV)
 {
-    float a = nDotV * sqrt(alphaSquared + nDotL * (nDotL - alphaSquared * nDotL));
-    float b = nDotL * sqrt(alphaSquared + nDotV * (nDotV - alphaSquared * nDotV));
-    return 0.5f / (a + b);
+    NdotL = saturate(NdotL);
+    NdotV = saturate(NdotV);
+
+    float lambdaV = NdotL * sqrt(alpha2 + (1 - alpha2) * NdotV * NdotV);
+    float lambdaL = NdotV * sqrt(alpha2 + (1 - alpha2) * NdotL * NdotL);
+
+    return 0.5f / max(lambdaV + lambdaL, 1e-7);
 }
 
 float4 main(VertexOutput inVert) : SV_TARGET0
@@ -130,7 +135,6 @@ float4 main(VertexOutput inVert) : SV_TARGET0
     float4 rawMaterialInfo = gMaterialInfo.Sample(gMaterialInfoSampler, inVert.uv);
     float roughness = rawMaterialInfo.g;
     float metalness = rawMaterialInfo.b;
-    float ambient = 0.01;
     float3 n = normalize(gNormal.Sample(gNormalSampler, inVert.uv).rgb);
     float3 l = -normalize(LIGHT_DIR);
     float3 h = normalize(l + v);
@@ -144,10 +148,17 @@ float4 main(VertexOutput inVert) : SV_TARGET0
     float alphaSquared = alpha * alpha;
     float3 f0 = lerp(float3(0.04, 0.04, 0.04), baseColor, metalness);
     float3 fresnel = F(f0, hDotV);
-    float3 specularBRDF = fresnel * D(alphaSquared, nDotH) * G(alphaSquared, nDotL, nDotV);
-    float3 combinedBRDF = (float3(1.0, 1.0, 1.0) - fresnel) * diffuseBRDF(baseColor, metalness) + specularBRDF;
+    float3 specular = fresnel * D(alphaSquared, nDotH) * G(alphaSquared, nDotL, nDotV);
+    float3 diffuse = (float3(1.0, 1.0, 1.0) - fresnel) * diffuseBRDF(baseColor, metalness);
+    float3 combinedBRDF = diffuse + specular;
     float3 directLighting = LIGHT_COL * combinedBRDF * nDotL;
     
-    // TODO: add environment mapping instead of ambient
-    return float4(directLighting + (1.0 - metalness) * ambient * baseColor, 1.0);
+    // Indirect lighting (not physically correct, it will be replaced once GI is implemented)
+    float3 kd = (1.0 - fresnel) * (1.0 - metalness);
+    float3 ambientDiffuse = 0.3 * baseColor * kd;
+    float3 r = reflect(-v, n);
+    float3 specularIBL = skybox.Sample(samplers[1], r).rgb * fresnel * (1 - roughness * 0.7);
+    float3 indirectLighting = ambientDiffuse + specularIBL;
+    
+    return float4(directLighting + indirectLighting, 1.0);
 }

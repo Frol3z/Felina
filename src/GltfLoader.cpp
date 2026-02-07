@@ -11,14 +11,22 @@
 namespace Felina
 {
 	// Load all meshes in `model` and fill `meshes` with the corresponding MeshIDs
-	static void LoadMeshes(tinygltf::Model& model, Renderer& renderer, std::unordered_map<int, MeshID>& meshes)
+	static void LoadMeshes(tinygltf::Model& model, Renderer& renderer, 
+		std::unordered_map<int, MaterialID>& materials, 
+		std::unordered_map<int, std::vector<MeshID>>& meshes
+	)
 	{
 		auto& rm = ResourceManager::GetInstance();
 		
 		// Iterate through all meshes and load them
-		for (size_t i = 0; i < model.meshes.size(); i++)
+		size_t i = 0; // mesh glTF index
+		for (auto& mesh : model.meshes)
 		{
-			auto& mesh = model.meshes[i];
+			std::vector<MeshID> primitives;
+			primitives.reserve(mesh.primitives.size());
+
+			// Iterate through primitives
+			size_t j = 0;
 			for (auto& primitive : mesh.primitives)
 			{
 				// NOTE: only mode currently supported is TRIANGLE_LIST (see PipelineBuilder.cpp)
@@ -27,53 +35,93 @@ namespace Felina
 
 				// Loading vertices
 				std::vector<Vertex> vertices;
+
 				{
+					// POSITION and NORMAL are mandatory
+					// TEXCOORD_0 is optional and if absent it's filled with dummy values
+					
 					// Vertex position
-					auto& posAccessor = model.accessors[primitive.attributes["POSITION"]];
+					auto posIt = primitive.attributes.find("POSITION");
+					if(posIt == primitive.attributes.end())
+						throw std::runtime_error("[GltfLoader] Mandatory POSITION attribute missing!");
+					auto& posAccessor = model.accessors[posIt->second];
 					auto& posBufferView = model.bufferViews[posAccessor.bufferView];
 					auto& posBuffer = model.buffers[posBufferView.buffer];
+					assert(posAccessor.type == TINYGLTF_TYPE_VEC3 && "[GltfLoader] Unexpected type found for vertex position!");
+					assert(posAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT && "[GltfLoader] Unexpected componentType found for vertex position!");
+
+					const uint8_t* posStart = posBuffer.data.data() + posBufferView.byteOffset + posAccessor.byteOffset;
+					size_t posStride = posAccessor.ByteStride(posBufferView);
+
 					// Vertex normal
+					auto normIt = primitive.attributes.find("NORMAL");
+					if (normIt == primitive.attributes.end())
+						throw std::runtime_error("[GltfLoader] Mandatory NORMAL attribute missing!");
 					auto& normAccessor = model.accessors[primitive.attributes["NORMAL"]];
 					auto& normBufferView = model.bufferViews[normAccessor.bufferView];
 					auto& normBuffer = model.buffers[normBufferView.buffer];
-					// Vertex UVs
-					auto& uvAccessor = model.accessors[primitive.attributes["TEXCOORD_0"]];
-					auto& uvBufferView = model.bufferViews[uvAccessor.bufferView];
-					auto& uvBuffer = model.buffers[uvBufferView.buffer];
-
-					// The following assertion SHOULD be guaranteed by the implementation 
-					// of the glTF-2.0 specs, so these checks are just for safety
-					assert(posAccessor.type == TINYGLTF_TYPE_VEC3 && "[GltfLoader] Unexpected type found for vertex position!");
-					assert(posAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT && "[GltfLoader] Unexpected componentType found for vertex position!");
 					assert(normAccessor.type == TINYGLTF_TYPE_VEC3 && "[GltfLoader] Unexpected type found for vertex normal!");
 					assert(normAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT && "[GltfLoader] Unexpected componentType found for vertex normal!");
-					assert(uvAccessor.type == TINYGLTF_TYPE_VEC2 && "[GltfLoader] Unexpected type found for uv!");
-					// TODO: add unsigned byte and unsigned short component type support
-					assert(uvAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT && "[GltfLoader] Unexpected componentType found for vertex normal!");
 
-					// Reading data from the buffer
-					const uint8_t* posStart = posBuffer.data.data() + posBufferView.byteOffset + posAccessor.byteOffset;
 					const uint8_t* normStart = normBuffer.data.data() + normBufferView.byteOffset + normAccessor.byteOffset;
-					const uint8_t* uvStart = uvBuffer.data.data() + uvBufferView.byteOffset + uvAccessor.byteOffset;
-					size_t posStride = posAccessor.ByteStride(posBufferView);
 					size_t normStride = normAccessor.ByteStride(normBufferView);
-					size_t uvStride = uvAccessor.ByteStride(uvBufferView);
-
-					// The following assertion SHOULD be guaranteed by the implementation as well
 					assert(posAccessor.count == normAccessor.count && "[GltfLoader] Number of vertex positions and normals differ!");
-					assert(posAccessor.count == uvAccessor.count && "[GltfLoader] Number of vertex positions and uv differ!");
-					
-					vertices.resize(posAccessor.count);
-					for (size_t i = 0; i < posAccessor.count; i++)
-					{
-						const float* posPtr = reinterpret_cast<const float*>(posStart + i * posStride);
-						const float* normPtr = reinterpret_cast<const float*>(normStart + i * normStride);
-						const float* uvPtr = reinterpret_cast<const float*>(uvStart + i * uvStride);
 
-						vertices[i].pos = glm::vec3(posPtr[0], posPtr[1], posPtr[2]);
-						vertices[i].normal = glm::vec3(normPtr[0], normPtr[1], normPtr[2]);
-						vertices[i].uv = glm::vec2(uvPtr[0], uvPtr[1]);
+					// Vertex UVs (optional)
+					auto uvIt = primitive.attributes.find("TEXCOORD_0");
+					const uint8_t* uvStart = nullptr;
+					size_t uvStride = 0;
+					if (uvIt != primitive.attributes.end())
+					{
+						auto& uvAccessor = model.accessors[primitive.attributes["TEXCOORD_0"]];
+						auto& uvBufferView = model.bufferViews[uvAccessor.bufferView];
+						auto& uvBuffer = model.buffers[uvBufferView.buffer];
+
+						assert(uvAccessor.type == TINYGLTF_TYPE_VEC2 && "[GltfLoader] Unexpected type found for uv!");
+						// TODO: add unsigned byte and unsigned short component type support
+						assert(uvAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT && "[GltfLoader] Unexpected componentType found for vertex normal!");
+
+						uvStart = uvBuffer.data.data() + uvBufferView.byteOffset + uvAccessor.byteOffset;
+						uvStride = uvAccessor.ByteStride(uvBufferView);
+						assert(posAccessor.count == uvAccessor.count && "[GltfLoader] Number of vertex positions and uv differ!");
 					}
+
+					// Warn about unsupported attributes detected
+					for (auto& [name, accessorIdx] : primitive.attributes)
+						if (name != "POSITION" && name != "NORMAL" && name != "TEXCOORD_0")
+							LOG("[GltfLoader] WARNING! Unsupported attributes found: " + name);	
+					
+					// Fill the vertex data
+					// TODO: improve handling of optional attributes
+					vertices.resize(posAccessor.count);
+					if (uvStart)
+					{
+						for (size_t i = 0; i < posAccessor.count; i++)
+						{
+							const float* posPtr = reinterpret_cast<const float*>(posStart + i * posStride);
+							vertices[i].pos = glm::vec3(posPtr[0], posPtr[1], posPtr[2]);
+						
+							const float* normPtr = reinterpret_cast<const float*>(normStart + i * normStride);
+							vertices[i].normal = glm::vec3(normPtr[0], normPtr[1], normPtr[2]);
+
+							const float* uvPtr = reinterpret_cast<const float*>(uvStart + i * uvStride);
+							vertices[i].uv = glm::vec2(uvPtr[0], uvPtr[1]);
+						}
+					}
+					else 
+					{
+						for (size_t i = 0; i < posAccessor.count; i++)
+						{
+							const float* posPtr = reinterpret_cast<const float*>(posStart + i * posStride);
+							vertices[i].pos = glm::vec3(posPtr[0], posPtr[1], posPtr[2]);
+
+							const float* normPtr = reinterpret_cast<const float*>(normStart + i * normStride);
+							vertices[i].normal = glm::vec3(normPtr[0], normPtr[1], normPtr[2]);
+
+							vertices[i].uv = glm::vec2(0.0f, 0.0f); // dummy UV
+						}
+					}
+
 				}
 
 				// TODO: properly handle loading meshes without indices, by calling the correct draw call
@@ -121,10 +169,27 @@ namespace Felina
 					}
 				}
 
-				// Create and load mesh
-				MeshID id = rm.LoadMesh(std::make_unique<Mesh>(vertices, indices), mesh.name, renderer);
-				meshes.insert(std::pair<int, MeshID>(static_cast<int>(i), id));
+				// Retrieve material info
+				MaterialID matId = rm.GetDefaultMaterial();
+				if(primitive.material != -1)
+					matId = materials.at(primitive.material);
+
+				// Mesh name (to avoid conflicting names)
+				std::string meshName{};
+				if (j == 0)
+					meshName = mesh.name;
+				else
+					meshName = mesh.name + " (" + std::to_string(j) + ')';
+
+
+				// Create and load primitive as a mesh
+				MeshID id = rm.LoadMesh(std::make_unique<Mesh>(vertices, indices, matId), meshName, renderer);
+				primitives.push_back(id);
+
+				j++; // increment primitive counter
 			}
+			meshes.insert(std::pair<int, std::vector<MeshID>>(static_cast<int>(i), primitives));
+			i++;
 		}
 		LOG("[GltfLoader] Loaded " + std::to_string(meshes.size()) + " meshes");
 	}
@@ -132,6 +197,12 @@ namespace Felina
 	// Load all textures in `model` and fill `textures` with the corresponding TextureIDs
 	static void LoadTextures(tinygltf::Model& model, Renderer& renderer, std::unordered_map<int, TextureID>& textures)
 	{
+		if (model.textures.size() > MAX_TEXTURES)
+			throw std::runtime_error("[GltfLoader] Tried to load "
+				+ std::to_string(model.textures.size()) + " textures when MAX_TEXTURES is set to "
+				+ std::to_string(MAX_TEXTURES) + "!"
+			);
+
 		auto& rm = ResourceManager::GetInstance();
 		for (size_t i = 0; i < model.textures.size(); i++)
 		{
@@ -173,6 +244,12 @@ namespace Felina
 	// Load all materials in `model` and fill `materials` with the corresponding MaterialIDs
 	static void LoadMaterials(tinygltf::Model& model, std::unordered_map<int, TextureID>& textures, std::unordered_map<int, MaterialID>& materials)
 	{
+		if (model.materials.size() > MAX_MATERIALS)
+			throw std::runtime_error("[GltfLoader] Tried to load "
+				+ std::to_string(model.materials.size()) + " materials when MAX_MATERIALS is set to "
+				+ std::to_string(MAX_MATERIALS) + "!"
+			);
+
 		auto& rm = ResourceManager::GetInstance();
 		for (size_t i = 0; i < model.materials.size(); i++)
 		{
@@ -209,31 +286,22 @@ namespace Felina
 
 	// Create object and iterate recursively through its children
 	static std::unique_ptr<Object> LoadNode(
-		const tinygltf::Node& node, Object* parent,
-		const tinygltf::Model& model, 
-		const std::unordered_map<int, MeshID>& meshes, const std::unordered_map<int, MaterialID>& materials
+		const tinygltf::Node& node, Object* parent, const tinygltf::Model& model, 
+		const std::unordered_map<int, std::vector<MeshID>>& lookUpMeshes
 	)
 	{
-		MeshID meshId{};
-		MaterialID materialId{};
-		if (node.mesh == -1)
+		// Object creation
+		std::unique_ptr<Object> obj = nullptr;
+		if (node.mesh != -1)
 		{
-			meshId = -1;
-			materialId = -1;
+			std::vector<MeshID> meshes = lookUpMeshes.at(node.mesh);
+			obj = std::make_unique<Object>(node.name, meshes, parent);
 		}
 		else
 		{
-			meshId = meshes.at(node.mesh);
-			const tinygltf::Mesh& mesh = model.meshes[node.mesh];
-			
-			// Here it is assumed that if a mesh has multiple primitives,
-			// they'll be all rendered with the material used by the first one
-			// TODO: add submeshes support
-			materialId = materials.at(mesh.primitives[0].material);
+			obj = std::make_unique<Object>(node.name, parent);
 		}
 
-		// Object creation
-		std::unique_ptr<Object> obj = std::make_unique<Object>(node.name, meshId, materialId, parent);
 
 		// Apply transform
 		// Transform -> see p.18 of glTF specs
@@ -256,7 +324,7 @@ namespace Felina
 		// Iterate over its children
 		for (const auto childIdx : node.children)
 		{
-			std::unique_ptr<Object> child = LoadNode(model.nodes[childIdx], obj.get(), model, meshes, materials);
+			std::unique_ptr<Object> child = LoadNode(model.nodes[childIdx], obj.get(), model, lookUpMeshes);
 			obj->AddChild(std::move(child)); // Move child object ownership to the parent
 		}
 		return std::move(obj);
@@ -304,18 +372,29 @@ namespace Felina
 		ParseFile(filepath, model); // Bottleneck D:
 
 		// Load resources
-		// NOTE: texture MUST be loaded before materials!
-		std::unordered_map<int, MeshID>	meshes; // Look-up between glTF indices and ResourceID
+		// NOTE: loading should respect the following order of dependencies
+		// First you load textures -> materials -> meshes
+
+		// LUT associating a glTF index with the corresponding ResourceID
 		std::unordered_map<int, TextureID> textures;
 		std::unordered_map<int, MaterialID> materials;
-		LoadMeshes(model, renderer, meshes);
+		std::unordered_map<int, std::vector<MeshID>> meshes;
+
 		LoadTextures(model, renderer, textures);
 		LoadMaterials(model, textures, materials);
+		LoadMeshes(model, renderer, materials, meshes);
+
+		// Check for max number of nodes
+		if (model.nodes.size() > MAX_OBJECTS)
+			throw std::runtime_error("[GltfLoader] Tried to load "
+				+ std::to_string(model.nodes.size()) + " objects when MAX_OBJECTS is set to "
+				+ std::to_string(MAX_OBJECTS) + "!"
+			);
 
 		// Iterate through each top-level node (parent = nullptr)
 		for (const auto nodeIdx : model.scenes[model.defaultScene].nodes)
 		{
-			std::unique_ptr<Object> obj = LoadNode(model.nodes[nodeIdx], nullptr, model, meshes, materials);
+			std::unique_ptr<Object> obj = LoadNode(model.nodes[nodeIdx], nullptr, model, meshes);
 			scene.AddObject(std::move(obj)); // Move top-level object ownership to the scene
 		}
 	}

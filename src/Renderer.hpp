@@ -9,6 +9,7 @@
 
 // Required for MaterialID and MeshID definitions
 #include "ResourceManager.hpp"
+#include "Common.hpp"
 
 struct ImGui_ImplVulkan_InitInfo;
 struct ImDrawData;
@@ -58,17 +59,6 @@ namespace Felina
 				uint32_t materialIndex;
 			};
 
-			// NOTE: for a greater number of concurrent frames
-			// the CPU might get ahead of the GPU causing latency
-			// between frames
-			static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
-
-			// Max number of drawable objects
-			static constexpr uint32_t MAX_OBJECTS = 100;
-
-			// Max number of materials
-			static constexpr uint32_t MAX_MATERIALS = 10;
-
 			// Max number of descriptor sets PER FRAME
 			// Current sets:
 			// - camera UBO
@@ -77,9 +67,7 @@ namespace Felina
 			// - GBuffer (see GBuffer class)
 			// - texture and sampler arrays
 			static constexpr uint32_t MAX_DESCRIPTOR_SETS = 5;
-
 			static constexpr uint32_t MAX_SAMPLERS = 2;
-			static constexpr uint32_t MAX_TEXTURES = 30;
 
 		public:
 			Renderer(Application& app, const Window& window, const Scene& scene);

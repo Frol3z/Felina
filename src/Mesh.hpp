@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Common.hpp"
+
 #include <vulkan/vulkan_raii.hpp>
 #include <glm/glm.hpp>
 #include <vector>
@@ -34,31 +36,28 @@ namespace Felina
 	class Mesh
 	{
 		public:
-			enum Type { CUBE = 0, SPHERE };
-		public:
-			Mesh(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices);
-			Mesh(Mesh::Type type); // Procedurally generate a mesh based on type
+			// TODO: replace the optional material with a default material
+			Mesh(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, MaterialID material = (MaterialID) -1);
 			~Mesh();
 
 			void Load(Device& device);
 			void Unload();
 			
-			const Buffer& GetVertexBuffer() const { 
+			inline const Buffer& GetVertexBuffer() const { 
 				assert(m_vertexBuffer && "Vertex buffer not initialized");
 				return *m_vertexBuffer;
 			};
-			const Buffer& GetIndexBuffer() const { 
+			inline const Buffer& GetIndexBuffer() const { 
 				assert(m_indexBuffer && "Index buffer not initialized");
 				return *m_indexBuffer;
 			};
+			inline size_t GetIndexBufferSize() const { return m_indices.size(); };
+			inline vk::IndexType GetIndexType() const { return vk::IndexType::eUint32; };
 
-			size_t GetIndexBufferSize() const { return m_indices.size(); };
-			vk::IndexType GetIndexType() const { return vk::IndexType::eUint32; };
+			inline void SetMaterial(MaterialID newMaterial) { m_material = newMaterial; };
+			inline MaterialID GetMaterial() const { return m_material; };
 
 		private:
-			void CreateCubeMesh();
-			void CreateSphereMesh(uint32_t nSlices = 32, uint32_t nStacks = 32);
-
 			void CreateStagingBuffer(Device& device, vk::DeviceSize size);
 			void DestroyStagingBuffer();
 			void CreateVertexBuffer(Device& device, vk::DeviceSize size);
@@ -70,5 +69,7 @@ namespace Felina
 			std::unique_ptr<Buffer> m_stagingBuffer = nullptr;
 			std::unique_ptr<Buffer> m_vertexBuffer = nullptr;
 			std::unique_ptr<Buffer> m_indexBuffer = nullptr;
+
+			MaterialID m_material = (MaterialID) -1;
 	};
 }

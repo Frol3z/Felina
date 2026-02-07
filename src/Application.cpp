@@ -37,6 +37,16 @@ namespace Felina
 		m_scene = std::make_unique<Scene>(static_cast<float>(m_startupWindowWidth), static_cast<float>(m_startupWindowHeight));
 		m_renderer = std::make_unique<Renderer>(*this, *m_window, *m_scene);
 
+		// Load default material
+		std::unique_ptr<Material> defaultMaterial = std::make_unique<Material>(
+			glm::vec3(0.5f), // Base color (light gray)
+			glm::vec4(0.0f, 1.0f, 0.0f, 0.0f) // Metallic-roughness (100% rough)
+		);
+		auto& rm = ResourceManager::GetInstance();
+		MaterialID defaultMaterialId = rm.LoadMaterial(std::move(defaultMaterial), "Default Material");
+		rm.SetDefaultMaterial(defaultMaterialId);
+		LOG("[Application] Loading default material...");
+
 		InitImGui();
 		LoadScene();
 

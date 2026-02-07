@@ -10,23 +10,18 @@ namespace Felina
 	class Object
 	{
 		public:
-			Object(const std::string& name, MeshID mesh = -1, MaterialID material = -1, Object* parent = nullptr)
-				: m_name(name), m_mesh(mesh), m_material(material), m_parent(parent)
-			{}
-			
-			// Resources
-			void SetMaterial(MaterialID id) { m_material = id; }
-			void SetMesh(MeshID id) { m_mesh = id; }
+			Object(const std::string& name, Object* parent = nullptr) : m_name(name), m_parent(parent) {}
+			Object(const std::string& name, const std::vector<MeshID>& meshes, Object* parent = nullptr)
+				: m_name(name), m_meshes(meshes), m_parent(parent) {}
 
 			// Children
 			void AddChild(std::unique_ptr<Object> child);
 			const std::vector<std::unique_ptr<Object>>& GetChildren() const { return m_children; }
 
 			// Getters
-			const std::string& GetName() const { return m_name; }
-			MeshID GetMesh() const { return m_mesh; }
-			MaterialID GetMaterial() const { return m_material; }
-			glm::mat4 GetModelMatrix() const { return m_transform.GetMatrix(); }
+			inline const std::string& GetName() const { return m_name; }
+			inline const std::vector<MeshID>& GetMeshes() const { return m_meshes; }
+			inline glm::mat4 GetModelMatrix() const { return m_transform.GetMatrix(); }
 
 			// Transform
 			void Translate(const glm::vec3& translation) { m_transform.Translate(translation);}
@@ -42,11 +37,8 @@ namespace Felina
 
 		private:
 			std::string m_name;
-
-			MeshID m_mesh;
-			MaterialID m_material;
-			
 			Transform m_transform;
+			std::vector<MeshID> m_meshes;
 
 			Object* m_parent;
 			std::vector<std::unique_ptr<Object>> m_children;

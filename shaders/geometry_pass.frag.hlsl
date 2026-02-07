@@ -1,4 +1,4 @@
-#define MAX_TEXTURES 10 // must match the one in Renderer.hpp
+#define MAX_TEXTURES 136 // must match the one in Renderer.hpp
 #define MAX_SAMPLERS 2
 
 // Material data
@@ -45,13 +45,13 @@ FragmentOutput main(VertexOutput inVert)
     
     // Base Color
     if(m.baseColorTex != -1)
-        output.baseColor = textures[m.baseColorTex].Sample(samplers[0], inVert.uv);
+        output.baseColor = textures[m.baseColorTex].Sample(samplers[1], inVert.uv);
     else
         output.baseColor = float4(m.baseColor, 1.0);
     
     // Material Info
     if (m.materialInfoTex != -1)
-        output.materialInfo = textures[m.materialInfoTex].Sample(samplers[0], inVert.uv);
+        output.materialInfo = textures[m.materialInfoTex].Sample(samplers[1], inVert.uv);
     else
         output.materialInfo = m.materialInfo;
     
