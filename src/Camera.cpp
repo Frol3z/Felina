@@ -3,6 +3,7 @@
 #include "Common.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 namespace Felina
 {
@@ -17,10 +18,19 @@ namespace Felina
 	}
 
 	void Camera::Rotate(double azimuth, double elevation)
-	{		
-		glm::mat4 horizontalRotation = glm::rotate(glm::mat4(1.0f), static_cast<float>(glm::radians(azimuth)), m_localUp);
-		glm::mat4 totalRotation = glm::rotate(horizontalRotation, static_cast<float>(glm::radians(elevation)), m_localRight);
-		m_position = totalRotation * glm::vec4(m_position, 1.0f);
+	{
+		// TODO: fix snapping
+
+		// Apply rotations
+		glm::vec3 offset = m_position - m_target;
+		glm::quat qAzimuth = glm::angleAxis(glm::radians((float)azimuth), glm::vec3(0.0f, 0.0f, 1.0f));
+		offset = qAzimuth * offset;
+
+		glm::vec3 right = glm::normalize(glm::cross(glm::vec3(0.0f, 0.0f, 1.0f), offset));
+		glm::quat qElevation = glm::angleAxis(glm::radians((float)elevation), right);
+		offset = qElevation * offset;
+
+		m_position = m_target + offset;
 
 		ComputeLocalCoordinateSystem();
 		ComputeViewMatrix();
