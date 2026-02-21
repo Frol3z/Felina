@@ -2,6 +2,7 @@
 
 #include "tiny_gltf.h"
 #include <glm/gtc/type_ptr.hpp>
+#include <glm/gtx/matrix_decompose.hpp>
 
 #include "Scene.hpp"
 #include "Renderer.hpp"
@@ -305,20 +306,28 @@ namespace Felina
 
 		// Apply transform
 		// Transform -> see p.18 of glTF specs
+		// NOTE: we are converting from the conventional glTF coordinate sytem (right-handed Y up)
+		// to our internal renderer coordinate system (right-handed Z up)
 		if (node.matrix.size() == 16) // if matrix is specified it will have priority
 		{
 			LOG("Matrix found!");
 			glm::mat4 mat = glm::make_mat4(node.matrix.data());
-			obj->SetModelMatrix(mat);
+			glm::mat4 matZUp(
+				glm::vec4(mat[0][0], mat[0][2], mat[0][1], mat[0][3]),
+				glm::vec4(mat[2][0], mat[2][2], mat[2][1], mat[2][3]),
+				glm::vec4(mat[1][0], mat[1][2], mat[1][1], mat[1][3]),
+				glm::vec4(mat[3][0], mat[3][2], mat[3][1], mat[3][3])
+			);
+			obj->SetModelMatrix(matZUp);
 		}
 		else
 		{
 			if (node.scale.size())
-				obj->SetScale(glm::vec3(node.scale[0], node.scale[1], node.scale[2]));
+				obj->SetScale(glm::vec3(node.scale[0], node.scale[2], node.scale[1]));
 			if (node.rotation.size()) // XYZW
-				obj->SetRotation(glm::quat(node.rotation[3], node.rotation[0], node.rotation[1], node.rotation[2])); // WXYZ
+				obj->SetRotation(glm::quat(node.rotation[3], node.rotation[0], node.rotation[2], node.rotation[1])); // WXYZ
 			if (node.translation.size())
-				obj->SetPosition(glm::vec3(node.translation[0], node.translation[1], node.translation[2]));
+				obj->SetPosition(glm::vec3(node.translation[0], node.translation[2], node.translation[1]));
 		}
 			
 		// Iterate over its children
