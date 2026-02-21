@@ -285,9 +285,16 @@ namespace Felina
 		LOG("[GltfLoader] Loaded " + std::to_string(materials.size()) + " materials");
 	}
 
+	static Light::Type ToLightType(const std::string& type)
+	{
+		if (type == "directional") return Light::Type::DIRECTIONAL;
+		if (type == "point") return Light::Type::POINT;
+		if (type == "spot") return Light::Type::SPOT;
+	}
+
 	// Create object and iterate recursively through its children
 	static std::unique_ptr<Object> LoadNode(
-		const tinygltf::Node& node, Object* parent, const tinygltf::Model& model, 
+		const tinygltf::Node& node, Object* parent, const tinygltf::Model& model,
 		const std::unordered_map<int, std::vector<MeshID>>& lookUpMeshes
 	)
 	{
@@ -303,6 +310,28 @@ namespace Felina
 			obj = std::make_unique<Object>(node.name, parent);
 		}
 
+		// Light data
+		if (node.light != -1)
+		{
+			// Retrieve light from glTF
+			const tinygltf::Light& light = model.lights[node.light];
+
+			// Set object light data
+			Light lightData{
+				ToLightType(light.type),							// type
+				glm::vec3(											// color
+					static_cast<float>(light.color[0]),
+					static_cast<float>(light.color[1]),
+					static_cast<float>(light.color[2])
+				),
+				static_cast<float>(light.intensity),				// intensity
+				static_cast<float>(light.range),					// range
+				static_cast<float>(light.spot.innerConeAngle),		// innerCone
+				static_cast<float>(light.spot.outerConeAngle),		// outerCone
+				light.name											// name
+			};
+			obj->SetLightData(lightData);
+		}
 
 		// Apply transform
 		// Transform -> see p.18 of glTF specs

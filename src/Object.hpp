@@ -2,6 +2,7 @@
 
 #include "ResourceManager.hpp"
 #include "Transform.hpp"
+#include "Light.hpp"
 
 #include <string>
 
@@ -14,14 +15,12 @@ namespace Felina
 			Object(const std::string& name, const std::vector<MeshID>& meshes, Object* parent = nullptr)
 				: m_name(name), m_meshes(meshes), m_parent(parent) {}
 
+			inline const std::string& GetName() const { return m_name; }
+			inline const std::vector<MeshID>& GetMeshes() const { return m_meshes; }
+
 			// Children
 			void AddChild(std::unique_ptr<Object> child);
 			const std::vector<std::unique_ptr<Object>>& GetChildren() const { return m_children; }
-
-			// Getters
-			inline const std::string& GetName() const { return m_name; }
-			inline const std::vector<MeshID>& GetMeshes() const { return m_meshes; }
-			inline glm::mat4 GetModelMatrix() const { return m_transform.GetMatrix(); }
 
 			// Transform
 			void Translate(const glm::vec3& translation) { m_transform.Translate(translation);}
@@ -34,6 +33,11 @@ namespace Felina
 			const glm::vec3& GetPosition() const { return m_transform.GetPosition(); }
 			const glm::quat& GetRotation() const { return m_transform.GetRotation(); }
 			const glm::vec3& GetScale() const { return m_transform.GetScale(); }
+			inline glm::mat4 GetModelMatrix() const { return m_transform.GetMatrix(); }
+
+			// Light
+			inline void SetLightData(Light data) { m_lightData = data; }
+			inline std::optional<Light> GetLightData() const { return m_lightData; }
 
 		private:
 			std::string m_name;
@@ -42,5 +46,7 @@ namespace Felina
 
 			Object* m_parent;
 			std::vector<std::unique_ptr<Object>> m_children;
+
+			std::optional<Light> m_lightData;
 	};
 }

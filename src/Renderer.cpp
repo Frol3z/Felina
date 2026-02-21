@@ -430,6 +430,14 @@ namespace Felina
             });
         }
 
+        // Process light data
+        std::optional<Light> lightData = obj.GetLightData();
+        if (lightData.has_value())
+        {
+            const Light& light = lightData.value();
+            LOG("Light type: " + std::to_string((int)light.type));
+        }
+
         // Iterate through its children
         for (const auto& childPtr : obj.GetChildren())
         {
