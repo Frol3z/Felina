@@ -38,6 +38,27 @@ namespace Felina
 				glm::mat4 invViewProj;
 			};
 
+			// NOTE: everything is 16 bytes aligned
+			struct LightData // 80 byte
+			{
+				uint32_t	type;			// DIRECTIONAL = 0, POINT = 1, SPOT = 2
+				glm::vec3	color;
+				glm::vec3	position;       // used by POINT and SPOT
+				glm::vec3	direction;      // used by DIRECTIONAL and SPOT 
+				
+				float		intensity;
+				float		range;
+				float		innerConeAngle;
+				float		outerConeAngle;
+			};
+
+			struct LightsUBO
+			{
+				std::array<LightData, MAX_LIGHTS> lights;
+				uint32_t lightsCount;
+				uint32_t padding[3];
+			};
+
 			struct MaterialData
 			{
 				glm::vec3 baseColor;
@@ -62,11 +83,12 @@ namespace Felina
 			// Max number of descriptor sets PER FRAME
 			// Current sets:
 			// - camera UBO
+			// - lights UBO
 			// - objects SSBO
 			// - materials SSBO
 			// - GBuffer (see GBuffer class)
 			// - texture and sampler arrays
-			static constexpr uint32_t MAX_DESCRIPTOR_SETS = 5;
+			static constexpr uint32_t MAX_DESCRIPTOR_SETS = 6;
 			static constexpr uint32_t MAX_SAMPLERS = 2;
 
 		public:
@@ -145,6 +167,7 @@ namespace Felina
 			std::array<std::unique_ptr<GBuffer>, MAX_FRAMES_IN_FLIGHT> m_gBuffers;
 
 			vk::raii::DescriptorSetLayout m_cameraSetLayout = nullptr;
+			vk::raii::DescriptorSetLayout m_lightSetLayout = nullptr;
 			vk::raii::DescriptorSetLayout m_materialSetLayout = nullptr;
 			vk::raii::DescriptorSetLayout m_objectSetLayout = nullptr;
 			vk::raii::DescriptorSetLayout m_textureSetLayout = nullptr;
@@ -160,9 +183,11 @@ namespace Felina
 			std::array<std::optional<vk::raii::Sampler>, MAX_SAMPLERS> m_samplers;
 
 			std::array<std::unique_ptr<Buffer>, MAX_FRAMES_IN_FLIGHT> m_cameraUBOs;
+			std::array<std::unique_ptr<Buffer>, MAX_FRAMES_IN_FLIGHT> m_lightUBOs;
 			std::array<std::unique_ptr<Buffer>, MAX_FRAMES_IN_FLIGHT> m_objectSSBOs;
 			std::array<std::unique_ptr<Buffer>, MAX_FRAMES_IN_FLIGHT> m_materialSSBOs;
 			std::vector<vk::raii::DescriptorSet> m_cameraDescriptorSets;
+			std::vector<vk::raii::DescriptorSet> m_lightDescriptorSets;
 			std::vector<vk::raii::DescriptorSet> m_objectDescriptorSets;
 			std::vector<vk::raii::DescriptorSet> m_materialDescriptorSets;
 			// Just one shared between frames because it will be read-only

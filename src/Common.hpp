@@ -20,6 +20,7 @@ namespace Felina
 	constexpr uint8_t MAX_OBJECTS = 200; // max number of drawable objects
 	constexpr uint8_t MAX_MATERIALS = 128;
 	constexpr uint8_t MAX_TEXTURES = 136; // skybox not included
+	constexpr uint8_t MAX_LIGHTS = 16;
 
 	const std::filesystem::path DEFAULT_SCENE{ "./assets/complex_hierarchy.glb" };
 	const std::filesystem::path SKYBOX_DIR{ "./assets/skybox/" };

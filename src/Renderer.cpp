@@ -336,6 +336,22 @@ namespace Felina
             };
             m_device->GetDevice().updateDescriptorSets(cameraWrite, {});
 
+            // Lights descriptor set
+            vk::DescriptorBufferInfo lightUBOInfo{
+                .buffer = m_lightUBOs[i]->GetHandle(),
+                .offset = 0,
+                .range = sizeof(LightsUBO)
+            };
+            vk::WriteDescriptorSet lightWrite{
+                .dstSet = m_lightDescriptorSets[i],
+                .dstBinding = 0,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eUniformBuffer,
+                .pBufferInfo = &lightUBOInfo
+            };
+            m_device->GetDevice().updateDescriptorSets(lightWrite, {});
+
             // Object descriptor set
             vk::DescriptorBufferInfo objectSSBOInfo{
                 .buffer = m_objectSSBOs[i]->GetHandle(),
@@ -417,7 +433,9 @@ namespace Felina
         ImGui_ImplVulkan_RenderDrawData(drawData, *m_commandBuffers[m_currentFrame]);
     }
 
-    static void UpdateObject(const Object& obj, glm::mat4 parentModelMatrix, std::vector<Renderer::ObjectData>& objectDatas)
+    static void UpdateObject(const Object& obj, glm::mat4 parentModelMatrix, 
+        std::vector<Renderer::ObjectData>& objectDatas, std::vector<Renderer::LightData>& lightDatas
+    )
     {
         // Add current object data
         glm::mat4 modelMatrix = parentModelMatrix * obj.GetModelMatrix();
@@ -431,18 +449,33 @@ namespace Felina
         }
 
         // Process light data
-        std::optional<Light> lightData = obj.GetLightData();
-        if (lightData.has_value())
+        std::optional<Light> lightObjData = obj.GetLightData();
+        if (lightObjData.has_value())
         {
-            const Light& light = lightData.value();
-            LOG("Light type: " + std::to_string((int)light.type));
+            const Light& light = lightObjData.value();
+            glm::vec4 defaultLightDir = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f); // see KHR_punctual_lights glTF extension
+            glm::vec3 lightPos = modelMatrix * glm::vec4(obj.GetPosition(), 1.0f);
+            glm::vec3 lightDir = glm::normalize(modelMatrix * defaultLightDir);
+            
+            Renderer::LightData ld{}; // zero-initialize everything, including padding
+
+            ld.type = static_cast<uint32_t>(light.type);
+            ld.color = light.color;
+            ld.position = lightPos;
+            ld.direction = lightDir;
+            ld.intensity = light.intensity;
+            ld.range = light.range;
+            ld.innerConeAngle = light.innerConeAngle;
+            ld.outerConeAngle = light.outerConeAngle;
+
+            lightDatas.push_back(ld);
         }
 
         // Iterate through its children
         for (const auto& childPtr : obj.GetChildren())
         {
             const Object& child = *childPtr;
-            UpdateObject(child, modelMatrix, objectDatas);
+            UpdateObject(child, modelMatrix, objectDatas, lightDatas);
         }
     }
 
@@ -456,15 +489,26 @@ namespace Felina
         cameraData.invViewProj = m_scene.GetCamera().GetInvViewProj();
         m_cameraUBOs[m_currentFrame]->LoadData(&cameraData, sizeof(cameraData));
 
-        // Fill the object data storage buffer
+        // Fill the object data storage buffer and lights data uniform buffer
         const std::vector<std::unique_ptr<Object>>& objects = m_scene.GetObjects();
         std::vector<ObjectData> objectDatas;
+        std::vector<LightData> lightDatas;
+        lightDatas.reserve(MAX_LIGHTS);
+
+        // Scene hierarchy traversal
         for (const auto& objPtr : objects)
         {
             const Object& obj = *objPtr;
-            UpdateObject(obj, glm::mat4(1.0f), objectDatas);
+            UpdateObject(obj, glm::mat4(1.0f), objectDatas, lightDatas);
         }
+
+        // Create LightsUBO
+        LightsUBO lightsUBO{};
+        lightsUBO.lightsCount = lightDatas.size();
+        std::copy(lightDatas.begin(), lightDatas.end(), lightsUBO.lights.begin());
+
         m_objectSSBOs[m_currentFrame]->LoadData(objectDatas.data(), objectDatas.size() * sizeof(ObjectData));
+        m_lightUBOs[m_currentFrame]->LoadData(&lightsUBO, sizeof(LightsUBO));
         
         // TODO: optimize by avoid doing these iterations each frame if not needed
         // Iterate through texture to fill up the look-up table
@@ -640,11 +684,26 @@ namespace Felina
             .stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 
             .pImmutableSamplers = nullptr
         };
-        vk::DescriptorSetLayoutCreateInfo cameraLayout{
+        vk::DescriptorSetLayoutCreateInfo cameraLayout {
             .bindingCount = 1,
             .pBindings = &cameraBinding
         };
         m_cameraSetLayout = vk::raii::DescriptorSetLayout(m_device->GetDevice(), cameraLayout);
+
+        // Lights set layout
+        // Binding 0 -> LightsUBO
+        vk::DescriptorSetLayoutBinding lightBinding {
+            .binding = 0,
+            .descriptorType = vk::DescriptorType::eUniformBuffer,
+            .descriptorCount = 1,
+            .stageFlags = vk::ShaderStageFlagBits::eFragment,
+            .pImmutableSamplers = nullptr
+        };
+        vk::DescriptorSetLayoutCreateInfo lightLayout {
+            .bindingCount = 1,
+            .pBindings = &lightBinding
+        };
+        m_lightSetLayout = vk::raii::DescriptorSetLayout(m_device->GetDevice(), lightLayout);
 
         // Object set layout
         // Binding 0 -> ObjectData
@@ -755,7 +814,7 @@ namespace Felina
         pipelineBuilder.DisableBackfaceCulling(); // To avoid culling the fullscreen triangle
         pipelineBuilder.SetColorBlending(1); // 1 attachment -> swapchain image
         pipelineBuilder.SetPipelineLayout(
-            std::vector<vk::DescriptorSetLayout>{ m_cameraSetLayout, gBuffer->GetDescriptorSetLayout(), m_textureSetLayout },
+            std::vector<vk::DescriptorSetLayout>{ m_cameraSetLayout, m_lightSetLayout, gBuffer->GetDescriptorSetLayout(), m_textureSetLayout },
             std::vector<vk::PushConstantRange>{}
         );
         pipelineBuilder.SetAttachmentsFormat(std::vector<vk::Format>{ m_swapchain->GetSurfaceFormat().format }, vk::Format::eUndefined); // no depth attachment
@@ -843,13 +902,21 @@ namespace Felina
     {
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
-            // Global uniform buffer creation
-            vk::BufferCreateInfo uboInfo{};
-            uboInfo.size = sizeof(CameraData);
-            uboInfo.usage = vk::BufferUsageFlagBits::eUniformBuffer;
-            VmaAllocationCreateInfo uboAllocInfo{};
-            uboAllocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-            m_cameraUBOs[i] = std::make_unique<Buffer>(m_device->GetAllocator(), uboInfo, uboAllocInfo, true);
+            // Camera uniform buffer
+            vk::BufferCreateInfo cameraUboInfo{};
+            cameraUboInfo.size = sizeof(CameraData);
+            cameraUboInfo.usage = vk::BufferUsageFlagBits::eUniformBuffer;
+            VmaAllocationCreateInfo cameraUboAllocInfo{};
+            cameraUboAllocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+            m_cameraUBOs[i] = std::make_unique<Buffer>(m_device->GetAllocator(), cameraUboInfo, cameraUboAllocInfo, true);
+
+            // Lights uniform buffer
+            vk::BufferCreateInfo lightsUboInfo{};
+            lightsUboInfo.size = sizeof(LightsUBO);
+            lightsUboInfo.usage = vk::BufferUsageFlagBits::eUniformBuffer;
+            VmaAllocationCreateInfo lightsUboAllocInfo{};
+            lightsUboAllocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+            m_lightUBOs[i] = std::make_unique<Buffer>(m_device->GetAllocator(), lightsUboInfo, lightsUboAllocInfo, true);
 
             // Object data storage buffer creation
             vk::BufferCreateInfo objectSsboInfo{};
@@ -875,14 +942,20 @@ namespace Felina
         // NOTE: the pool is created before the GBuffer because it
         // uses the pool to allocate the attachments sets
         uint32_t attachmentsCount = 3 * MAX_FRAMES_IN_FLIGHT;
-        std::array<vk::DescriptorPoolSize, 5> poolSizes {
+        std::array<vk::DescriptorPoolSize, MAX_DESCRIPTOR_SETS> poolSizes {
+            // Camera
             vk::DescriptorPoolSize { .type = vk::DescriptorType::eUniformBuffer, .descriptorCount = MAX_FRAMES_IN_FLIGHT },
-            vk::DescriptorPoolSize { .type = vk::DescriptorType::eStorageBuffer, .descriptorCount = MAX_FRAMES_IN_FLIGHT },
-            vk::DescriptorPoolSize { 
-                .type = vk::DescriptorType::eCombinedImageSampler,
-                .descriptorCount = attachmentsCount
-            },
+            
+            // Lights
+            vk::DescriptorPoolSize { .type = vk::DescriptorType::eUniformBuffer, .descriptorCount = MAX_FRAMES_IN_FLIGHT },
 
+            // Objects and materials
+            vk::DescriptorPoolSize { .type = vk::DescriptorType::eStorageBuffer, .descriptorCount = 2 * MAX_FRAMES_IN_FLIGHT },
+            
+            // GBuffer
+            vk::DescriptorPoolSize { .type = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = attachmentsCount },
+
+            // Texture
             // These reserved space will be used by ONE descriptor set (see below)
             vk::DescriptorPoolSize { .type = vk::DescriptorType::eSampledImage, .descriptorCount = MAX_TEXTURES + 1 },
             vk::DescriptorPoolSize { .type = vk::DescriptorType::eSampler, .descriptorCount = MAX_SAMPLERS }
@@ -907,6 +980,15 @@ namespace Felina
             .pSetLayouts = cameraLayouts.data()
         };
         m_cameraDescriptorSets = m_device->GetDevice().allocateDescriptorSets(cameraAllocInfo);
+
+        // Lights
+        std::vector<vk::DescriptorSetLayout> lightLayouts(MAX_FRAMES_IN_FLIGHT, m_lightSetLayout);
+        vk::DescriptorSetAllocateInfo lightAllocInfo{
+            .descriptorPool = m_descriptorPool,
+            .descriptorSetCount = static_cast<uint32_t>(lightLayouts.size()),
+            .pSetLayouts = lightLayouts.data()
+        };
+        m_lightDescriptorSets = m_device->GetDevice().allocateDescriptorSets(lightAllocInfo);
 
         // Object
         std::vector<vk::DescriptorSetLayout> objectLayouts(MAX_FRAMES_IN_FLIGHT, m_objectSetLayout);
@@ -1160,7 +1242,7 @@ namespace Felina
         // Bind descriptor sets (camera UBO, G-buffer)
         m_commandBuffers[m_currentFrame].bindDescriptorSets(
             vk::PipelineBindPoint::eGraphics, m_defLightingPipelineLayout, 0,
-            { m_cameraDescriptorSets[m_currentFrame], gBuffer->GetDescriptorSet(), m_textureDescriptorSets }, 
+            { m_cameraDescriptorSets[m_currentFrame], m_lightDescriptorSets[m_currentFrame], gBuffer->GetDescriptorSet(), m_textureDescriptorSets }, 
             nullptr
         );
 

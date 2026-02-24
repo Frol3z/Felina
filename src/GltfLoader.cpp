@@ -310,7 +310,7 @@ namespace Felina
 			obj = std::make_unique<Object>(node.name, parent);
 		}
 
-		// Light data
+		// Loading light data (optional)
 		if (node.light != -1)
 		{
 			// Retrieve light from glTF
