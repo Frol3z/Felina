@@ -77,6 +77,19 @@ Texture2D textures[MAX_TEXTURES];
 [[vk::binding(2, 3)]]
 TextureCube skybox;
 
+// ACES film tonemapper (Narkowicz)
+// ref. https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
+float3 tonemapACES(float3 x)
+{
+    float a = 2.51f;
+    float b = 0.03f;
+    float c = 2.43f;
+    float d = 0.59f;
+    float e = 0.14f;
+    
+    return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
+}
+
 float3 reconstructWorldPosition(float depth, float2 uv)
 {
     float2 ndc = uv * 2.0 - 1.0; // convert [0, 1] to [-1, 1]
@@ -142,16 +155,22 @@ float G(float alpha2, float NdotL, float NdotV)
 
 float4 main(VertexOutput inVert) : SV_TARGET0
 {
+    float3 outColor = float3(0.0, 0.0, 0.0);
     float depth = gDepth.Sample(gDepthSampler, inVert.uv).r;
     float3 fragWorldPosition = reconstructWorldPosition(depth, inVert.uv);
     float3 v = normalize(cameraData.position - fragWorldPosition);
+    
+    // TODO: move the exposure in CameraData
+    float exposure = 0.5; // tweak
     
     // If the fragment belongs to the background then the skybox will be sampled
     // else shading must be computed
     // TODO: add a separate skybox pass
     if (depth >= 1.0)
     {
-        return skybox.Sample(samplers[1], -v);
+        outColor = skybox.Sample(samplers[1], -v);
+        outColor = tonemapACES(exposure * outColor);
+        return float4(outColor, 1.0);
     }
     
     // Light indipendent values
@@ -170,7 +189,6 @@ float4 main(VertexOutput inVert) : SV_TARGET0
     
     // Iterating through lights
     // TODO: handle different light types
-    float3 outColor = float3(0.0, 0.0, 0.0);
     for (uint i = 0; i < lightsUBO.lightsCount; i++)
     {
         LightData lightData = lightsUBO.lights[i];
@@ -199,9 +217,7 @@ float4 main(VertexOutput inVert) : SV_TARGET0
     //outColor += indirectLighting;
     
     // Tone mapping
-    // TODO: find a suitable tone mapper
-    float exposure = 0.005; // tweak
-    outColor = 1.0 - exp(-outColor * exposure);
+    outColor = tonemapACES(outColor * exposure);
     
     return float4(outColor, 1.0);
 }
