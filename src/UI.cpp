@@ -55,12 +55,21 @@ namespace Felina
 			DrawHierarchyObject(obj.get(), idx);
 		}
 
-		// Log camera info
+		// Camera stuff
 		ImGui::SeparatorText("Camera");
-		glm::vec3 pos = scene.GetCamera().GetPosition();
-		glm::vec3 target = scene.GetCamera().GetTarget();
+		
+		Camera& camera = scene.GetCamera();
+		glm::vec3 pos = camera.GetPosition();
+		glm::vec3 target = camera.GetTarget();
+		float exposure = camera.GetExposure() * 100.0; // rescaling
+		float skyboxIntensity = camera.GetSkyboxIntensity();
+
 		ImGui::TextDisabled("Camera: (%.2f, %.2f, %.2f)", pos.x, pos.y, pos.z);
-		ImGui::TextDisabled("Target: (%.2f, %.2f, %.2f)", target.x, target.y, target.z);		
+		ImGui::TextDisabled("Target: (%.2f, %.2f, %.2f)", target.x, target.y, target.z);
+		if (ImGui::DragFloat("Exposure", &exposure, 0.001f, 0.0f, 1.0f))
+			camera.SetExposure(exposure * 0.01); // rescaling
+		if (ImGui::DragFloat("Skybox Intensity", &skyboxIntensity, 0.01f, 0.0f, 1.0f))
+			camera.SetSkyboxIntensity(skyboxIntensity);
 		
 		ImGui::End();
 	}

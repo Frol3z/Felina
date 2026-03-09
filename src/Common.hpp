@@ -21,9 +21,10 @@ namespace Felina
 	constexpr uint8_t MAX_MATERIALS = 128;
 	constexpr uint8_t MAX_TEXTURES = 136; // skybox not included
 	constexpr uint8_t MAX_LIGHTS = 16;
+	constexpr uint16_t CUBEMAP_RESOLUTION = 1024;
 
 	const std::filesystem::path DEFAULT_SCENE{ "./assets/complex_hierarchy.glb" };
-	const std::filesystem::path SKYBOX_DIR{ "./assets/skybox/" };
+	const std::filesystem::path SKYBOX{ "./assets/skybox/qwantani_dusk_2_puresky_4k.hdr" };
 	const std::filesystem::path ASSETS_DIR{ "./assets/" };
 
 	// NOTE: originally designed to read SPIR-V file, so it

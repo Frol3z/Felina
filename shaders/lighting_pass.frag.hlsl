@@ -17,6 +17,8 @@ struct CameraData
     float4x4    view;
     float4x4    proj;
     float4x4    invViewProj;
+    float       skyboxIntensity;
+    float       exposure;
 };
 
 // NOTE: .w for color, position and direction is padding
@@ -160,16 +162,14 @@ float4 main(VertexOutput inVert) : SV_TARGET0
     float3 fragWorldPosition = reconstructWorldPosition(depth, inVert.uv);
     float3 v = normalize(cameraData.position - fragWorldPosition);
     
-    // TODO: move the exposure in CameraData
-    float exposure = 0.5; // tweak
-    
     // If the fragment belongs to the background then the skybox will be sampled
     // else shading must be computed
     // TODO: add a separate skybox pass
     if (depth >= 1.0)
     {
+        // TODO: add separate skybox exposure
         outColor = skybox.Sample(samplers[1], -v);
-        outColor = tonemapACES(exposure * outColor);
+        outColor = tonemapACES(cameraData.skyboxIntensity * outColor);
         return float4(outColor, 1.0);
     }
     
@@ -217,7 +217,7 @@ float4 main(VertexOutput inVert) : SV_TARGET0
     //outColor += indirectLighting;
     
     // Tone mapping
-    outColor = tonemapACES(outColor * exposure);
+    outColor = tonemapACES(outColor * cameraData.exposure);
     
     return float4(outColor, 1.0);
 }

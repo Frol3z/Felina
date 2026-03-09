@@ -17,5 +17,3 @@ add_subdirectory(src)
 add_subdirectory(shaders)
 add_subdirectory(assets)
 add_dependencies(Felina Shaders Assets)
-
-

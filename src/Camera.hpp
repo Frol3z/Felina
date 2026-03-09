@@ -28,6 +28,12 @@ namespace Felina
 			glm::mat4 GetProjectionMatrix() const;
 			glm::mat4 GetViewMatrix() const;
 			glm::mat4 GetInvViewProj() const;
+
+			inline void SetExposure(float exposure) { m_exposure = exposure; }
+			inline const float GetExposure() const { return m_exposure; }
+
+			inline void SetSkyboxIntensity(float intensity) { m_skyboxIntensity = intensity; }
+			inline const float GetSkyboxIntensity() const { return m_skyboxIntensity; }
 	
 		private:
 			void ComputeLocalCoordinateSystem();
@@ -47,6 +53,10 @@ namespace Felina
 			
 			// Target position (world origin by default)
 			glm::vec3 m_target;
+
+			// Exposures
+			float m_exposure = 0.005f; // scene exposure
+			float m_skyboxIntensity = 0.2f;
 
 			float m_left = 0.0f;
 			float m_right = 0.0f;

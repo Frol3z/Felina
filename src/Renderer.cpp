@@ -45,6 +45,7 @@ namespace Felina
         CreateDevice();
         CreateSwapchain();
         CreateDescriptorPool();
+        CreateEquirectToCubemapPipeline();
         CreateGBuffer();
         CreateDescriptorSetLayouts();
         CreatePushConstant();
@@ -175,74 +176,292 @@ namespace Felina
         m_device->CopyBufferToImage(stagingBuffer, texture, size);
     }
 
-    void Renderer::LoadSkybox(const std::filesystem::path& folderPath)
+    void Renderer::UpdateEquirectToCubemapDescriptorSet(const Texture& texture, const vk::Sampler sampler)
     {
-        constexpr int requiredComponents = 4;
-        constexpr int faceCount = 6;
-
-        std::array<unsigned char*, faceCount> faces { };
-        int width{ 0 };
-        int height{ 0 };
-
-        // Load the faces images
-        size_t i { 0 };
-        for (auto const& dirEntry : std::filesystem::directory_iterator{ folderPath })
-        {
-            const std::string& path = dirEntry.path().string();
-            LOG("[Renderer] Loading " + path + "...");
-
-            int w, h, c;
-            faces[i] = stbi_load(path.c_str(), &w, &h, &c, requiredComponents);
-            if (!faces[i])
-                throw std::runtime_error("[Renderer] Failed to load skybox face #" + std::to_string(i));
-
-            if(i == 0)
-            {
-                width = w;
-                height = h;
-            }
-            else
-            {
-                assert(width == w && height == h);
-            }
-            i++;
-        }
-        assert(i == 6);
-
-        // Pack the data into a single buffer
-        size_t faceSize = width * height * requiredComponents;
-        size_t cubeMapSize = faceSize * faceCount;
-        std::vector<unsigned char> cubeMapData(cubeMapSize);
-        for (size_t face = 0; face < 6; face++)
-        {
-            memcpy(
-                cubeMapData.data() + face * faceSize, // Dst
-                faces[face],                          // Src
-                faceSize                              // Size
-            );
-        }
-
-        // Create texture
-        vk::ImageCreateInfo imageInfo{
-            .flags          = vk::ImageCreateFlagBits::eCubeCompatible, // !
-            .imageType      = vk::ImageType::e2D,
-            .format         = vk::Format::eR8G8B8A8Srgb,
-            .extent         = vk::Extent3D{ static_cast<uint32_t>(width),static_cast<uint32_t>(height), 1 },
-            .mipLevels      = 1,
-            .arrayLayers    = 6, // !
-            .samples        = vk::SampleCountFlagBits::e1,
-            .tiling         = vk::ImageTiling::eOptimal,
-            .usage          = vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
-            .sharingMode    = vk::SharingMode::eExclusive,
-            .initialLayout  = vk::ImageLayout::eUndefined
+        vk::DescriptorImageInfo imageInfo{
+            .sampler = sampler,
+            .imageView = texture.GetImageView(),
+            .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal
         };
-        VmaAllocationCreateInfo allocInfo = { .usage = VMA_MEMORY_USAGE_AUTO };
+
+        vk::WriteDescriptorSet write{
+            .dstSet = m_equirectToCubemapDescriptorSet,
+            .dstBinding = 0,
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+            .pImageInfo = &imageInfo
+        };
+
+        m_device->GetDevice().updateDescriptorSets(write, nullptr);
+    }
+
+    void Renderer::RecordEquirectToCubemapDescriptorSetCommandBuffer(const vk::raii::CommandBuffer& cmdBuf)
+    {
+        const Texture& cubemap = ResourceManager::GetInstance().GetTexture(m_skyboxCubemap);
+
+        cmdBuf.begin({});
+        // Transition cubemap to COLOR_ATTACHMENT_OPTIMAL
+        vk::ImageMemoryBarrier firstBarrier{};
+        firstBarrier.oldLayout = vk::ImageLayout::eUndefined;
+        firstBarrier.newLayout = vk::ImageLayout::eColorAttachmentOptimal;
+        firstBarrier.image = cubemap.GetHandle();
+        firstBarrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+        firstBarrier.subresourceRange.baseMipLevel = 0;
+        firstBarrier.subresourceRange.levelCount = 1;
+        firstBarrier.subresourceRange.baseArrayLayer = 0;
+        firstBarrier.subresourceRange.layerCount = 6;
+        firstBarrier.srcAccessMask = {};
+        firstBarrier.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
+
+        cmdBuf.pipelineBarrier(
+            vk::PipelineStageFlagBits::eTopOfPipe,
+            vk::PipelineStageFlagBits::eColorAttachmentOutput,
+            {},
+            nullptr, nullptr, firstBarrier
+        );
+
+        // Begin dynamic rendering
+        vk::RenderingAttachmentInfo colorAttachment{};
+        colorAttachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+        colorAttachment.loadOp = vk::AttachmentLoadOp::eClear;
+        colorAttachment.storeOp = vk::AttachmentStoreOp::eStore;
+        colorAttachment.clearValue.color = std::array<float, 4>{ 0.f, 0.f, 0.f, 0.f };
+
+        vk::RenderingInfo renderingInfo{};
+        renderingInfo.layerCount = 1;
+        renderingInfo.colorAttachmentCount = 1;
+        renderingInfo.pColorAttachments = &colorAttachment;
+        renderingInfo.renderArea.extent.width = CUBEMAP_RESOLUTION;
+        renderingInfo.renderArea.extent.height = CUBEMAP_RESOLUTION;
+
+        // Viewport and scissors
+        cmdBuf.setViewport(
+            0,
+            vk::Viewport(0.0f, 0.0f, static_cast<float>(CUBEMAP_RESOLUTION), static_cast<float>(CUBEMAP_RESOLUTION), 0.0f, 1.0f)
+        );
+        cmdBuf.setScissor(
+            0, 
+            vk::Rect2D(vk::Offset2D(0, 0), vk::Extent2D{ CUBEMAP_RESOLUTION, CUBEMAP_RESOLUTION })
+        );
+
+        // Bind pipeline and descriptor set
+        cmdBuf.bindPipeline(vk::PipelineBindPoint::eGraphics, *m_equirectToCubemapPipeline);
+        cmdBuf.bindDescriptorSets(
+            vk::PipelineBindPoint::eGraphics,
+            *m_equirectToCubemapPipelineLayout,
+            0,
+            *m_equirectToCubemapDescriptorSet,
+            nullptr
+        );
+
+        // Compute projection and view matrix for each cube face
+        constexpr float nearPlane = 0.1f;
+        constexpr float farPlane = 10.0f;
+        constexpr float fovRad = glm::radians(90.0f);
+
+        glm::mat4 proj = glm::perspectiveRH_ZO(fovRad, 1.0f, nearPlane, farPlane);
+        proj[1][1] *= -1.0f; // Vulkan clip space Y-flip
+
+        glm::vec3 center(0.0f);
+        std::array<glm::mat4, 6> views = {
+            glm::lookAtRH(center, glm::vec3(1, 0, 0),  glm::vec3(0, 1, 0)), // +X
+            glm::lookAtRH(center, glm::vec3(-1, 0, 0), glm::vec3(0, 1, 0)), // -X
+            glm::lookAtRH(center, glm::vec3(0, 1, 0),  glm::vec3(0, 0, 1)), // +Y
+            glm::lookAtRH(center, glm::vec3(0,-1, 0),  glm::vec3(0, 0,-1)), // -Y
+            glm::lookAtRH(center, glm::vec3(0, 0,-1),  glm::vec3(0, 1, 0)), // +Z
+            glm::lookAtRH(center, glm::vec3(0, 0, 1),  glm::vec3(0, 1, 0))  // -Z
+        };
+
+        // Draw each cubemap face
+        for (uint32_t face = 0; face < 6; face++)
+        {
+            // Create per-face image view
+            vk::ImageViewCreateInfo viewInfo{};
+            viewInfo.image = cubemap.GetHandle();
+            viewInfo.viewType = vk::ImageViewType::e2D;
+            viewInfo.format = cubemap.GetFormat();
+            viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+            viewInfo.subresourceRange.baseMipLevel = 0;
+            viewInfo.subresourceRange.levelCount = 1;
+            viewInfo.subresourceRange.baseArrayLayer = face;
+            viewInfo.subresourceRange.layerCount = 1;
+
+            vk::raii::ImageView faceView(m_device->GetDevice(), viewInfo);
+            colorAttachment.imageView = *faceView;
+            cmdBuf.beginRendering(renderingInfo);
+
+            // Push the pc
+            EquirectToCubemapPushConst pc{};
+            pc.proj = proj;
+            pc.view = views[face];
+
+            cmdBuf.pushConstants(
+                *m_equirectToCubemapPipelineLayout,
+                vk::ShaderStageFlagBits::eVertex,
+                0,
+                vk::ArrayProxy<const EquirectToCubemapPushConst>(1, &pc)
+            );
+
+            // Vertex shader dispatch (36 vertices)
+            cmdBuf.draw(36, 1, 0, 0);
+
+            cmdBuf.endRendering();
+        }
+
+        // Transition cubemap to SHADER_READ_ONLY_OPTIMAL ready to be used
+        vk::ImageMemoryBarrier secondBarrier{};
+        secondBarrier.oldLayout = vk::ImageLayout::eColorAttachmentOptimal;
+        secondBarrier.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+        secondBarrier.srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
+        secondBarrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+        secondBarrier.image = cubemap.GetHandle();
+        secondBarrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+        secondBarrier.subresourceRange.baseMipLevel = 0;
+        secondBarrier.subresourceRange.levelCount = 1;
+        secondBarrier.subresourceRange.baseArrayLayer = 0;
+        secondBarrier.subresourceRange.layerCount = 6;
+
+        cmdBuf.pipelineBarrier(
+            vk::PipelineStageFlagBits::eColorAttachmentOutput,
+            vk::PipelineStageFlagBits::eFragmentShader,
+            {},
+            nullptr, nullptr, secondBarrier
+        );
+
+        cmdBuf.end();
+    }
+
+    void Renderer::LoadSkybox(const std::filesystem::path& filepath)
+    {
+        if(filepath.extension().string() != ".hdr")
+            throw std::runtime_error("[Renderer] Skybox image format not supported. Current supported formats: .hdr.");
+
+        // Load raw image data from .hdr file
+        int width{ 0 }, height{ 0 }, channels{ 0 }, requiredComponents{ 4 };
+        std::string filename = filepath.string();
+        float* data = stbi_loadf(filename.c_str(), &width, &height, &channels, requiredComponents);
+        size_t dataSize = static_cast<size_t>(width) * static_cast<size_t>(height) *
+            static_cast<size_t>(requiredComponents) * sizeof(float);
+
+        if (!data)
+            throw std::runtime_error("[Renderer] Failed to load " + filepath.string());
+
+        // Create the equirectangular texture
+        vk::ImageCreateInfo imageInfo{
+            .imageType = vk::ImageType::e2D,
+            .format = vk::Format::eR32G32B32A32Sfloat,
+            .extent = vk::Extent3D{ static_cast<uint32_t>(width),static_cast<uint32_t>(height), 1 },
+            .mipLevels = 1,
+            .arrayLayers = 1,
+            .samples = vk::SampleCountFlagBits::e1,
+            .tiling = vk::ImageTiling::eOptimal,
+            .usage = vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
+            .sharingMode = vk::SharingMode::eExclusive,
+            .initialLayout = vk::ImageLayout::eUndefined
+        };
+        VmaAllocationCreateInfo allocInfo = { .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE };
         std::unique_ptr<Texture> texture = std::make_unique<Texture>(*m_device, imageInfo, allocInfo);
 
-        // Load texture
-        // TODO: Renderer calling RM calling Renderer again, I should fix this weird process
-        ResourceManager::GetInstance().LoadTexture(std::move(texture), "Skybox", cubeMapData.data(), cubeMapSize, *this);
-        // TODO: free stb_image_data
+        // Load raw image data to GPU memory
+        LoadTexture(*texture, data, dataSize);
+
+        // Free image data from CPU memory
+        stbi_image_free(data);
+
+        // NOTE: using the sampler with bilinear filtering
+        UpdateEquirectToCubemapDescriptorSet(*texture, *m_samplers[1]);
+
+        // Allocate a temporary command buffer
+        // NOTE: I may be used a temporary dedicated pool if I ever need to optimize this
+        vk::CommandBufferAllocateInfo cmdBufAllocInfo{
+            .commandPool = m_commandPool,
+            .level = vk::CommandBufferLevel::ePrimary,
+            .commandBufferCount = 1
+        };
+        vk::raii::CommandBuffer cmdBuf = std::move(m_device->GetDevice().allocateCommandBuffers(cmdBufAllocInfo).front());
+
+        // Record commands
+        RecordEquirectToCubemapDescriptorSetCommandBuffer(cmdBuf);
+
+        // Submit to the queue and wait
+        vk::SubmitInfo submitInfo{};
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &*cmdBuf;
+        auto graphicsQueue = m_device->GetGraphicsQueue();
+        graphicsQueue.submit(submitInfo);
+        graphicsQueue.waitIdle();
+    }
+
+    void Renderer::CreateCubemap()
+    {
+        // Create cubemap texture
+        vk::ImageCreateInfo imageInfo{
+            .flags = vk::ImageCreateFlagBits::eCubeCompatible, // !
+            .imageType = vk::ImageType::e2D,
+            .format = vk::Format::eR16G16B16A16Sfloat,
+            .extent = vk::Extent3D{ static_cast<uint32_t>(CUBEMAP_RESOLUTION),static_cast<uint32_t>(CUBEMAP_RESOLUTION), 1 },
+            .mipLevels = 1,
+            .arrayLayers = 6, // !
+            .samples = vk::SampleCountFlagBits::e1,
+            .tiling = vk::ImageTiling::eOptimal,
+            .usage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
+            .sharingMode = vk::SharingMode::eExclusive,
+            .initialLayout = vk::ImageLayout::eUndefined
+        };
+        VmaAllocationCreateInfo allocInfo = { .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE };
+        std::unique_ptr<Texture> texture = std::make_unique<Texture>(*m_device, imageInfo, allocInfo);
+
+        // Load and move ownership of the texture to the RM
+        m_skyboxCubemap = ResourceManager::GetInstance().LoadTexture(std::move(texture), "Skybox");
+    }
+
+    void Renderer::CreateEquirectToCubemapPipeline()
+    {
+        // Create cubemap texture that will be used as attachment
+        CreateCubemap();
+
+        // Descriptor set layout creation
+        vk::DescriptorSetLayoutBinding binding{
+            .binding = 0,
+            .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+            .descriptorCount = 1,
+            .stageFlags = vk::ShaderStageFlagBits::eFragment,
+            .pImmutableSamplers = nullptr
+        };
+        vk::DescriptorSetLayoutCreateInfo layoutCreateInfo{
+            .bindingCount = 1,
+            .pBindings = &binding
+        };
+        m_equirectToCubemapSetLayout = vk::raii::DescriptorSetLayout(m_device->GetDevice(), layoutCreateInfo);
+
+        // Push constant
+        m_equirectToCubemapPushConst = {
+            .stageFlags = vk::ShaderStageFlagBits::eVertex,
+            .offset = 0,
+            .size = sizeof(EquirectToCubemapPushConst)
+        };
+
+        // Pipeline creation
+        const Texture& cubemap = ResourceManager::GetInstance().GetTexture(m_skyboxCubemap);
+        PipelineBuilder pipelineBuilder{ *m_device };
+        pipelineBuilder.DisableVertexInput();
+        pipelineBuilder.DisableBackfaceCulling();
+        std::vector<PipelineBuilder::ShaderStageInfo> shaderStages{
+            {"./shaders/equirect_to_cubemap.vert.spv", vk::ShaderStageFlagBits::eVertex},
+            {"./shaders/equirect_to_cubemap.frag.spv", vk::ShaderStageFlagBits::eFragment}
+        };
+        pipelineBuilder.SetShaderStages(shaderStages);
+        pipelineBuilder.SetColorBlending(static_cast<uint32_t>(1));
+
+        std::vector<vk::DescriptorSetLayout> layouts{ m_equirectToCubemapSetLayout };
+        std::vector<vk::PushConstantRange> ranges{ m_equirectToCubemapPushConst };
+        pipelineBuilder.SetPipelineLayout(layouts, ranges);
+        pipelineBuilder.SetAttachmentsFormat(std::vector<vk::Format>{ cubemap.GetFormat() }, vk::Format::eUndefined); // no depth attachment
+
+        auto [pipeline, pipelineLayout] = pipelineBuilder.BuildPipeline();
+        m_equirectToCubemapPipeline = std::move(pipeline);
+        m_equirectToCubemapPipelineLayout = std::move(pipelineLayout);
     }
 
     void Renderer::UpdateDescriptorSets()
@@ -483,10 +702,13 @@ namespace Felina
     {   
         // Update camera data
         CameraData cameraData{};
-        cameraData.position = m_scene.GetCamera().GetPosition();
-        cameraData.view = m_scene.GetCamera().GetViewMatrix();
-        cameraData.proj = m_scene.GetCamera().GetProjectionMatrix();
-        cameraData.invViewProj = m_scene.GetCamera().GetInvViewProj();
+        const Camera& camera = m_scene.GetCamera();
+        cameraData.position = camera.GetPosition();
+        cameraData.view = camera.GetViewMatrix();
+        cameraData.proj = camera.GetProjectionMatrix();
+        cameraData.invViewProj = camera.GetInvViewProj();
+        cameraData.skyboxIntensity = camera.GetSkyboxIntensity();
+        cameraData.exposure = camera.GetExposure();
         m_cameraUBOs[m_currentFrame]->LoadData(&cameraData, sizeof(cameraData));
 
         // Fill the object data storage buffer and lights data uniform buffer
@@ -943,6 +1165,9 @@ namespace Felina
         // uses the pool to allocate the attachments sets
         uint32_t attachmentsCount = 3 * MAX_FRAMES_IN_FLIGHT;
         std::array<vk::DescriptorPoolSize, MAX_DESCRIPTOR_SETS> poolSizes {
+            // EquirectToCubemap combined image sampler
+            vk::DescriptorPoolSize { .type = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = 1 },
+
             // Camera
             vk::DescriptorPoolSize { .type = vk::DescriptorType::eUniformBuffer, .descriptorCount = MAX_FRAMES_IN_FLIGHT },
             
@@ -972,6 +1197,14 @@ namespace Felina
     // Descriptor sets allocation from the main pool
     void Renderer::AllocateDescriptorSets()
     {
+        // EquirectToCubemap
+        vk::DescriptorSetAllocateInfo equirectToCubemapAllocInfo {
+            .descriptorPool = m_descriptorPool,
+            .descriptorSetCount = 1,
+            .pSetLayouts = &*m_equirectToCubemapSetLayout
+        };
+        m_equirectToCubemapDescriptorSet = std::move(m_device->GetDevice().allocateDescriptorSets(equirectToCubemapAllocInfo).front());
+
         // Camera
         std::vector<vk::DescriptorSetLayout> cameraLayouts(MAX_FRAMES_IN_FLIGHT, m_cameraSetLayout);
         vk::DescriptorSetAllocateInfo cameraAllocInfo{
