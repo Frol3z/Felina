@@ -5,10 +5,10 @@
 namespace Felina
 {
 	// This definitions may be moved somewhere else
-	// Coordinate system is right-handed Z-up
-	constexpr glm::vec3 WORLD_UP{ 0.0, 0.0, 1.0 };
+	// Coordinate system is right-handed Y-up
+	constexpr glm::vec3 WORLD_UP{ 0.0, 1.0, 0.0 };
 	constexpr glm::vec3 WORLD_RIGHT{ 1.0, 0.0, 0.0 };
-	constexpr glm::vec3 WORLD_FORWARD{ 0.0, 1.0, 0.0 };
+	constexpr glm::vec3 WORLD_FORWARD{ 0.0, 0.0, -1.0 };
 	constexpr glm::vec3 WORLD_ORIGIN{ 0.0, 0.0, 0.0 };
 
 	class Camera

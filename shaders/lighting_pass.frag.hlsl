@@ -162,12 +162,11 @@ float4 main(VertexOutput inVert) : SV_TARGET0
     float3 fragWorldPosition = reconstructWorldPosition(depth, inVert.uv);
     float3 v = normalize(cameraData.position - fragWorldPosition);
     
-    // If the fragment belongs to the background then the skybox will be sampled
-    // else shading must be computed
+    // If the fragment falls on the far plane
+    // the skybox is sampled, else shading is performed
     // TODO: add a separate skybox pass
     if (depth >= 1.0)
     {
-        // TODO: add separate skybox exposure
         outColor = skybox.Sample(samplers[1], -v);
         outColor = tonemapACES(cameraData.skyboxIntensity * outColor);
         return float4(outColor, 1.0);
@@ -183,16 +182,52 @@ float4 main(VertexOutput inVert) : SV_TARGET0
     float alpha = roughness * roughness;
     float alphaSquared = alpha * alpha;
     float3 f0 = lerp(float3(0.04, 0.04, 0.04), baseColor, metalness);
-    
-    // TODO: remove when temporary indirect lighting solution is replaced
     float3 r = reflect(-v, n);
     
-    // Iterating through lights
-    // TODO: handle different light types
+    // Iterating through the lights (by guaranteeing that lights are in the same
+    // order regardless of what fragment/thread is executing, branch divergence
+    // shouldn't be a problem)
     for (uint i = 0; i < lightsUBO.lightsCount; i++)
     {
         LightData lightData = lightsUBO.lights[i];
-        float3 l = -normalize(lightData.direction.xyz);
+        float3 l;
+        float attenuation = 1.0;
+        
+        if (lightData.type == 0) // DIRECTIONAL
+        {
+            l = -normalize(lightData.direction.xyz);
+        }
+        else // POINT and SPOT (they share the same setup)
+        {
+            l = normalize(lightData.position.xyz - fragWorldPosition);
+            float distance = length(lightData.position.xyz - fragWorldPosition);
+            
+            attenuation = 1.0 / max(distance * distance, 0.001);
+            if(lightData.range > 0.0) // if 0.0 -> infinite range
+            {
+                // windowing function multiplied by the inverse-square attenuation (see Real-Time Rendering)
+                attenuation = max(min(1.0 - pow(distance / lightData.range, 4), 1), 0) / (distance * distance);
+            }
+            
+            if (lightData.type == 2) // SPOT
+            {
+                // Spotlight cone check
+                // Checks how close the fragment is with respect to the spot light direction
+                float spotAngle = dot(-l, normalize(lightData.direction.xyz));
+                if (spotAngle > lightData.outerConeAngle)
+                {
+                    // Smooth falloff between inner and outer cone
+                    float spotFactor = smoothstep(lightData.outerConeAngle, lightData.innerConeAngle, spotAngle);
+                    attenuation *= spotFactor;
+                }
+                else
+                {
+                    // Outside the spotlight cone
+                    attenuation = 0.0; 
+                }
+            }
+        }
+    
         float3 h = normalize(l + v);
         float nDotL = max(dot(l, n), 0.0);
         float hDotV = max(dot(h, v), 0.0);
@@ -203,18 +238,11 @@ float4 main(VertexOutput inVert) : SV_TARGET0
         float3 specular = fresnel * D(alphaSquared, nDotH) * G(alphaSquared, nDotL, nDotV);
         float3 diffuse = (float3(1.0, 1.0, 1.0) - fresnel) * diffuseBRDF(baseColor, metalness);
         float3 combinedBRDF = diffuse + specular;
-        float3 directLighting = (lightData.color.rgb * lightData.intensity) * combinedBRDF * nDotL;
+        float3 directLighting = (lightData.color.rgb * lightData.intensity * attenuation) * combinedBRDF * nDotL;
         
         // Adding i-th light contribution
         outColor += directLighting;
     }
-    
-    // Indirect lighting evaluation (not physically correct, it will be replaced once GI is implemented)
-    //float3 kd = (1.0 - metalness);
-    //float3 ambientDiffuse = 0.3 * baseColor * kd;
-    //float3 specularIBL = skybox.Sample(samplers[1], r).rgb * fresnel * (1 - roughness * 0.7);
-    //float3 indirectLighting = ambientDiffuse + specularIBL;
-    //outColor += indirectLighting;
     
     // Tone mapping
     outColor = tonemapACES(outColor * cameraData.exposure);

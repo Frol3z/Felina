@@ -12,29 +12,29 @@ struct PushConsts
 
 static const float3 cubeVertices[36] =
 {
-    // +X face
-    float3(1, -1, 1), float3(1, -1, -1), float3(1, 1, -1),
-    float3(1, 1, -1), float3(1, 1, 1), float3(1, -1, 1),
+    // +X
+    float3(1, -1, -1), float3(1, -1, 1), float3(1, 1, 1),
+    float3(1, 1, 1), float3(1, 1, -1), float3(1, -1, -1),
 
-    // -X face
-    float3(-1, -1, -1), float3(-1, -1, 1), float3(-1, 1, 1),
-    float3(-1, 1, 1), float3(-1, 1, -1), float3(-1, -1, -1),
+    // -X
+    float3(-1, -1, 1), float3(-1, -1, -1), float3(-1, 1, -1),
+    float3(-1, 1, -1), float3(-1, 1, 1), float3(-1, -1, 1),
 
-    // +Y face (top)
-    float3(-1, 1, 1), float3(-1, 1, -1), float3(1, 1, -1),
-    float3(1, 1, -1), float3(1, 1, 1), float3(-1, 1, 1),
+    // +Y
+    float3(-1, 1, -1), float3(1, 1, -1), float3(1, 1, 1),
+    float3(1, 1, 1), float3(-1, 1, 1), float3(-1, 1, -1),
 
-    // -Y face (bottom)
-    float3(-1, -1, -1), float3(-1, -1, 1), float3(1, -1, 1),
-    float3(1, -1, 1), float3(1, -1, -1), float3(-1, -1, -1),
+    // -Y
+    float3(-1, -1, 1), float3(1, -1, 1), float3(1, -1, -1),
+    float3(1, -1, -1), float3(-1, -1, -1), float3(-1, -1, 1),
 
-    // +Z face
-    float3(-1, -1, -1), float3(-1, 1, -1), float3(1, 1, -1),
-    float3(1, 1, -1), float3(1, -1, -1), float3(-1, -1, -1),
-
-    // -Z face
+    // -Z
     float3(1, -1, 1), float3(1, 1, 1), float3(-1, 1, 1),
-    float3(-1, 1, 1), float3(-1, -1, 1), float3(1, -1, 1)
+    float3(-1, 1, 1), float3(-1, -1, 1), float3(1, -1, 1),
+
+    // +Z
+    float3(-1, -1, -1), float3(-1, 1, -1), float3(1, 1, -1),
+    float3(1, 1, -1), float3(1, -1, -1), float3(-1, -1, -1)
 };
 
 [[vk::push_constant]] PushConsts pushConsts;

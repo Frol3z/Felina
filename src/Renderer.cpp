@@ -265,12 +265,12 @@ namespace Felina
 
         glm::vec3 center(0.0f);
         std::array<glm::mat4, 6> views = {
-            glm::lookAtRH(center, glm::vec3(1, 0, 0),  glm::vec3(0, 1, 0)), // +X
-            glm::lookAtRH(center, glm::vec3(-1, 0, 0), glm::vec3(0, 1, 0)), // -X
+            glm::lookAtRH(center, glm::vec3(1, 0, 0),  glm::vec3(0, 1, 0)),  // +X
+            glm::lookAtRH(center, glm::vec3(-1, 0, 0), glm::vec3(0, 1, 0)),  // -X
             glm::lookAtRH(center, glm::vec3(0, 1, 0),  glm::vec3(0, 0, 1)), // +Y
-            glm::lookAtRH(center, glm::vec3(0,-1, 0),  glm::vec3(0, 0,-1)), // -Y
-            glm::lookAtRH(center, glm::vec3(0, 0,-1),  glm::vec3(0, 1, 0)), // +Z
-            glm::lookAtRH(center, glm::vec3(0, 0, 1),  glm::vec3(0, 1, 0))  // -Z
+            glm::lookAtRH(center, glm::vec3(0,-1, 0),  glm::vec3(0, 0, -1)),  // -Y
+            glm::lookAtRH(center, glm::vec3(0, 0,-1),  glm::vec3(0, 1, 0)),  // -Z
+            glm::lookAtRH(center, glm::vec3(0, 0, 1),  glm::vec3(0, 1, 0))   // +Z
         };
 
         // Draw each cubemap face
@@ -672,7 +672,7 @@ namespace Felina
         if (lightObjData.has_value())
         {
             const Light& light = lightObjData.value();
-            glm::vec4 defaultLightDir = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f); // see KHR_punctual_lights glTF extension
+            glm::vec4 defaultLightDir = glm::vec4(0.0f, 0.0f, -1.0f, 0.0f); // see KHR_punctual_lights glTF extension
             glm::vec3 lightPos = modelMatrix * glm::vec4(obj.GetPosition(), 1.0f);
             glm::vec3 lightDir = glm::normalize(modelMatrix * defaultLightDir);
             

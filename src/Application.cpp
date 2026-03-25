@@ -156,7 +156,7 @@ namespace Felina
 		
 		LoadSceneFromGlTF(filepath, *m_scene, *m_renderer);
 		// TODO: include camera in the glTF
-		m_scene->GetCamera().SetPosition(glm::vec3(0.0f, -6.0f, 3.0f));
+		m_scene->GetCamera().SetPosition(glm::vec3(0.0f, 3.0f, 6.0f));
 
 		// Binding the descriptors to the new textures
 		m_renderer->UpdateDescriptorSets();

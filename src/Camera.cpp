@@ -23,10 +23,10 @@ namespace Felina
 
 		// Apply rotations
 		glm::vec3 offset = m_position - m_target;
-		glm::quat qAzimuth = glm::angleAxis(glm::radians((float)azimuth), glm::vec3(0.0f, 0.0f, 1.0f));
+		glm::quat qAzimuth = glm::angleAxis(glm::radians((float)azimuth), WORLD_UP);
 		offset = qAzimuth * offset;
 
-		glm::vec3 right = glm::normalize(glm::cross(glm::vec3(0.0f, 0.0f, 1.0f), offset));
+		glm::vec3 right = glm::normalize(glm::cross(WORLD_UP, offset));
 		glm::quat qElevation = glm::angleAxis(glm::radians((float)elevation), right);
 		offset = qElevation * offset;
 
@@ -92,7 +92,7 @@ namespace Felina
 			// It may happen that if the camera is positioned at the
 			// world origin, then the resulting forward vector would be
 			// the null vector.
-			// If that's the case, the world +Y is assumed
+			// If that's the case, the world forward (-Z) is assumed
 			// as the forward direction.
 			m_localForward = WORLD_FORWARD;
 		}

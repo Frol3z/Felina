@@ -13,7 +13,7 @@ namespace Felina
         Type type;
         float range;
 
-        // Spot only
+        // Spot only (they store the cosine of the angle)
         float innerConeAngle;
         float outerConeAngle;
 

@@ -295,7 +295,7 @@ namespace Felina
 	// Create object and iterate recursively through its children
 	static std::unique_ptr<Object> LoadNode(
 		const tinygltf::Node& node, Object* parent, const tinygltf::Model& model,
-		const std::unordered_map<int, std::vector<MeshID>>& lookUpMeshes
+		const std::unordered_map<int, std::vector<MeshID>>& lookUpMeshes, size_t& lightsCount
 	)
 	{
 		// Object creation
@@ -326,43 +326,37 @@ namespace Felina
 				),
 				static_cast<float>(light.intensity),				// intensity
 				static_cast<float>(light.range),					// range
-				static_cast<float>(light.spot.innerConeAngle),		// innerCone
-				static_cast<float>(light.spot.outerConeAngle),		// outerCone
+				static_cast<float>(cos(light.spot.innerConeAngle)),	// innerCone
+				static_cast<float>(cos(light.spot.outerConeAngle)),	// outerCone
 				light.name											// name
 			};
 			obj->SetLightData(lightData);
+			
+			// Increment the lights count
+			lightsCount++;
 		}
 
 		// Apply transform
 		// Transform -> see p.18 of glTF specs
-		// NOTE: we are converting from the conventional glTF coordinate sytem (right-handed Y up)
-		// to our internal renderer coordinate system (right-handed Z up)
 		if (node.matrix.size() == 16) // if matrix is specified it will have priority
 		{
-			LOG("Matrix found!");
 			glm::mat4 mat = glm::make_mat4(node.matrix.data());
-			glm::mat4 matZUp(
-				glm::vec4(mat[0][0], mat[0][2], mat[0][1], mat[0][3]),
-				glm::vec4(mat[2][0], mat[2][2], mat[2][1], mat[2][3]),
-				glm::vec4(mat[1][0], mat[1][2], mat[1][1], mat[1][3]),
-				glm::vec4(mat[3][0], mat[3][2], mat[3][1], mat[3][3])
-			);
-			obj->SetModelMatrix(matZUp);
+			obj->SetModelMatrix(mat);
 		}
 		else
 		{
 			if (node.scale.size())
-				obj->SetScale(glm::vec3(node.scale[0], node.scale[2], node.scale[1]));
+				obj->SetScale(glm::vec3(node.scale[0], node.scale[1], node.scale[2]));
 			if (node.rotation.size()) // XYZW
-				obj->SetRotation(glm::quat(node.rotation[3], node.rotation[0], node.rotation[2], node.rotation[1])); // WXYZ
+				obj->SetRotation(glm::quat(node.rotation[3], node.rotation[0], node.rotation[1], node.rotation[2])); // WXYZ
 			if (node.translation.size())
-				obj->SetPosition(glm::vec3(node.translation[0], node.translation[2], node.translation[1]));
+				obj->SetPosition(glm::vec3(node.translation[0], node.translation[1], node.translation[2]));
 		}
 			
 		// Iterate over its children
 		for (const auto childIdx : node.children)
 		{
-			std::unique_ptr<Object> child = LoadNode(model.nodes[childIdx], obj.get(), model, lookUpMeshes);
+			std::unique_ptr<Object> child = LoadNode(model.nodes[childIdx], obj.get(), model, lookUpMeshes, lightsCount);
 			obj->AddChild(std::move(child)); // Move child object ownership to the parent
 		}
 		return std::move(obj);
@@ -424,16 +418,28 @@ namespace Felina
 
 		// Check for max number of nodes
 		if (model.nodes.size() > MAX_OBJECTS)
+		{
 			throw std::runtime_error("[GltfLoader] Tried to load "
 				+ std::to_string(model.nodes.size()) + " objects when MAX_OBJECTS is set to "
 				+ std::to_string(MAX_OBJECTS) + "!"
 			);
+		}
 
 		// Iterate through each top-level node (parent = nullptr)
+		size_t lightsCount = 0;
 		for (const auto nodeIdx : model.scenes[model.defaultScene].nodes)
 		{
-			std::unique_ptr<Object> obj = LoadNode(model.nodes[nodeIdx], nullptr, model, meshes);
+			std::unique_ptr<Object> obj = LoadNode(model.nodes[nodeIdx], nullptr, model, meshes, lightsCount);
 			scene.AddObject(std::move(obj)); // Move top-level object ownership to the scene
+		}
+
+		// Check for max number of lights
+		if (lightsCount > MAX_LIGHTS)
+		{
+			throw std::runtime_error("[GltfLoader] Tried to load "
+				+ std::to_string(lightsCount) + " lights when MAX_LIGHTS is set to "
+				+ std::to_string(MAX_LIGHTS) + "!"
+			);
 		}
 	}
 }
