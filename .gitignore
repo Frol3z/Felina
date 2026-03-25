@@ -364,3 +364,7 @@ FodyWeavers.xsd
 
 # Cmake build directory
 build/
+
+# Assets
+assets/skybox/*.hdr
+assets/*.glb

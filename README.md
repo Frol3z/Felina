@@ -2,15 +2,17 @@
 
 ![Renderer](rendering.png)
 
-Felina is a 3D renderer, i.e. a piece of software which takes a scene description as input and produces pretty visuals as output. 
-It is written in C++20 and uses Vulkan 1.4 under the hood.
+Felina is a 3D renderer, i.e. a piece of software which takes a scene description as input and produces pretty visuals as output.
+It is written in C++ and based on the Vulkan graphics API.
 
-This project started as a way of learning the Vulkan API and getting some hands-on experience on C++, 
-then it became more of a tool to study and experiment with real-time rendering techniques that pique my interests. 
-Sometimes some quality of life features outside of real-time rendering are added to improve the user experience, 
-e.g. basic user interface, abstractions, etc.
+This is a learning projects which I'm still updating, as such, some parts of it are pretty rough and not polished as I'd like them to be. 
+Right now, I'm prioritizing adding new features each time, and in doing so, I try to avoid bikeshedding as much as possible 
+(i.e. if I could take a shortcut, I will). From time to time, I revisit parts of the codebase to refactor and improve its structure and readability.
 
-Currently I'm working on adding texture supports on my materials.
+While the primary goal of this project is understanding and practicing real-time rendering techniques, 
+I also use it as a platform to refine my software engineering skills.
+
+*I'm currently working on adding shadow mapping and exploring the possibility of migrating the current descriptor system to the new VK_EXT_descriptor_heap.*
 
 # Features
 - simple user interface
@@ -18,13 +20,17 @@ Currently I'm working on adding texture supports on my materials.
 - PBR material system
 - texture support
 - glTF scene loading
+- skybox (with on the fly conversion from equirectangular to cubemap)
+- multiple punctual lights support
 # Roadmap
 ## Short term
-- multiple lights
+- shadow mapping
+- migration to VK_EXT_descriptor_heap
+- normal mapping
 - improve UX
+- improve portability
 ## Long term
-- cascaded shadow maps
-- hybrid GI
+- DDGI-based global illumination
 
 # Getting Started
 ## Prerequisites
@@ -69,7 +75,7 @@ cmake ..
 | 3            | Normal.X       | Normal.Y       | Normal.Z        | Unused |
 | 4            | Depth          | Depth          | Depth           | Depth  |
 
-## Descriptors
+## Descriptor sets
 ### Geometry Pass
 | Descriptor Set Layout | Binding | Set | VS  | FS  |
 | :-------------------- | :-----: | :-: | :-: | :-: |
@@ -88,7 +94,11 @@ cmake ..
 | Descriptor Set Layout |        Binding         | Set | VS  | FS  |
 | :-------------------- | :--------------------: | :-: | :-: | :-: |
 | Camera                |           0            |  0  |  N  |  Y  |
-| GBuffer               | See attachment # above |  1  |  N  |  Y  |
+| Lights                |           0            |  1  |  N  |  Y  |
+| GBuffer               | See attachment # above |  2  |  N  |  Y  |
+| Samplers              |			0			 |  3  |  N  |  Y  |
+| Textures              |			1			 |  3  |  N  |  Y  |
+| Skybox                |			2			 |  3  |  N  |  Y  |
 
 # References
 
@@ -102,3 +112,4 @@ https://docs.vulkan.org/guide/latest/hlsl.html
 ## On specific topics
 https://developer.nvidia.com/vulkan-memory-management
 https://wallisc.github.io/rendering/2021/04/18/Fullscreen-Pass.html
+https://learnopengl.com/PBR/IBL/Diffuse-irradiance

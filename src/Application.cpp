@@ -142,18 +142,21 @@ namespace Felina
 
 		// Unload previous resources (if a scene was already loaded)
 		m_scene->ClearObjects();
-		ResourceManager::GetInstance().UnloadAll();
+		// TODO:
+		// if multiple resources should be preserved a more robust
+		// method should be implemented
+		ResourceManager::GetInstance().UnloadSceneResources(m_renderer->GetSkyboxCubemapId());
 
 		// TODO: I can avoid reloading the skybox each time I reload the scene
 		LOG("[Application] Loading skybox...");
-		m_renderer->LoadSkybox(SKYBOX_DIR);
+		m_renderer->LoadSkybox(SKYBOX);
 		LOG("[Application] Skybox loaded successfully!");
 
 		LOG("[Application] Loading scene from " + filepath.string() + "...");
 		
 		LoadSceneFromGlTF(filepath, *m_scene, *m_renderer);
 		// TODO: include camera in the glTF
-		m_scene->GetCamera().SetPosition(glm::vec3(0.0f, -6.0f, 3.0f));
+		m_scene->GetCamera().SetPosition(glm::vec3(0.0f, 3.0f, 6.0f));
 
 		// Binding the descriptors to the new textures
 		m_renderer->UpdateDescriptorSets();

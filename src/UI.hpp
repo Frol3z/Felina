@@ -19,7 +19,6 @@ namespace Felina
 			void DrawSceneWindow(Scene& scene, Application& app);
 			void DrawHierarchyObject(Object* object, size_t& idx);
 			void DrawInspectorWindow();
-			void DrawInfoTab();
 
 			std::filesystem::path OpenFileDialog (const std::filesystem::path& defaultPath, const std::vector<const char *>& filters) const;
 

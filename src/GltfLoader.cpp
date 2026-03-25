@@ -2,6 +2,7 @@
 
 #include "tiny_gltf.h"
 #include <glm/gtc/type_ptr.hpp>
+#include <glm/gtx/matrix_decompose.hpp>
 
 #include "Scene.hpp"
 #include "Renderer.hpp"
@@ -284,10 +285,17 @@ namespace Felina
 		LOG("[GltfLoader] Loaded " + std::to_string(materials.size()) + " materials");
 	}
 
+	static Light::Type ToLightType(const std::string& type)
+	{
+		if (type == "directional") return Light::Type::DIRECTIONAL;
+		if (type == "point") return Light::Type::POINT;
+		if (type == "spot") return Light::Type::SPOT;
+	}
+
 	// Create object and iterate recursively through its children
 	static std::unique_ptr<Object> LoadNode(
-		const tinygltf::Node& node, Object* parent, const tinygltf::Model& model, 
-		const std::unordered_map<int, std::vector<MeshID>>& lookUpMeshes
+		const tinygltf::Node& node, Object* parent, const tinygltf::Model& model,
+		const std::unordered_map<int, std::vector<MeshID>>& lookUpMeshes, size_t& lightsCount
 	)
 	{
 		// Object creation
@@ -302,12 +310,36 @@ namespace Felina
 			obj = std::make_unique<Object>(node.name, parent);
 		}
 
+		// Loading light data (optional)
+		if (node.light != -1)
+		{
+			// Retrieve light from glTF
+			const tinygltf::Light& light = model.lights[node.light];
+
+			// Set object light data
+			Light lightData{
+				ToLightType(light.type),							// type
+				glm::vec3(											// color
+					static_cast<float>(light.color[0]),
+					static_cast<float>(light.color[1]),
+					static_cast<float>(light.color[2])
+				),
+				static_cast<float>(light.intensity),				// intensity
+				static_cast<float>(light.range),					// range
+				static_cast<float>(cos(light.spot.innerConeAngle)),	// innerCone
+				static_cast<float>(cos(light.spot.outerConeAngle)),	// outerCone
+				light.name											// name
+			};
+			obj->SetLightData(lightData);
+			
+			// Increment the lights count
+			lightsCount++;
+		}
 
 		// Apply transform
 		// Transform -> see p.18 of glTF specs
 		if (node.matrix.size() == 16) // if matrix is specified it will have priority
 		{
-			LOG("Matrix found!");
 			glm::mat4 mat = glm::make_mat4(node.matrix.data());
 			obj->SetModelMatrix(mat);
 		}
@@ -324,7 +356,7 @@ namespace Felina
 		// Iterate over its children
 		for (const auto childIdx : node.children)
 		{
-			std::unique_ptr<Object> child = LoadNode(model.nodes[childIdx], obj.get(), model, lookUpMeshes);
+			std::unique_ptr<Object> child = LoadNode(model.nodes[childIdx], obj.get(), model, lookUpMeshes, lightsCount);
 			obj->AddChild(std::move(child)); // Move child object ownership to the parent
 		}
 		return std::move(obj);
@@ -386,16 +418,28 @@ namespace Felina
 
 		// Check for max number of nodes
 		if (model.nodes.size() > MAX_OBJECTS)
+		{
 			throw std::runtime_error("[GltfLoader] Tried to load "
 				+ std::to_string(model.nodes.size()) + " objects when MAX_OBJECTS is set to "
 				+ std::to_string(MAX_OBJECTS) + "!"
 			);
+		}
 
 		// Iterate through each top-level node (parent = nullptr)
+		size_t lightsCount = 0;
 		for (const auto nodeIdx : model.scenes[model.defaultScene].nodes)
 		{
-			std::unique_ptr<Object> obj = LoadNode(model.nodes[nodeIdx], nullptr, model, meshes);
+			std::unique_ptr<Object> obj = LoadNode(model.nodes[nodeIdx], nullptr, model, meshes, lightsCount);
 			scene.AddObject(std::move(obj)); // Move top-level object ownership to the scene
+		}
+
+		// Check for max number of lights
+		if (lightsCount > MAX_LIGHTS)
+		{
+			throw std::runtime_error("[GltfLoader] Tried to load "
+				+ std::to_string(lightsCount) + " lights when MAX_LIGHTS is set to "
+				+ std::to_string(MAX_LIGHTS) + "!"
+			);
 		}
 	}
 }
