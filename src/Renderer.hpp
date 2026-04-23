@@ -88,6 +88,12 @@ namespace Felina
 				glm::mat4 view;
 			};
 
+			struct BLAS
+			{
+				vk::raii::AccelerationStructureKHR handle;
+				std::unique_ptr<Buffer> storageBuffer;
+			};
+
 			// Max number of descriptor sets PER FRAME
 			// Current sets:
 			// - equirect to cubemap combined image sampler
@@ -118,6 +124,7 @@ namespace Felina
 			ImGui_ImplVulkan_InitInfo GetImGuiInitInfo();
 			void DrawImGuiFrame(ImDrawData* drawData);
 
+			void BuildAccelerationStructure(); // move down (private)
 		private:
 			void SetupFrameData();
 			void UpdateOnFramebufferResized();
@@ -130,7 +137,7 @@ namespace Felina
 			void CreateDescriptorSetLayouts();
 			void CreatePushConstant();
 
-			// WIP
+			// Skybox & cubemap
 			void CreateCubemap();
 			void CreateEquirectToCubemapPipeline();
 			void UpdateEquirectToCubemapDescriptorSet(const Texture& texture, const vk::Sampler sampler);
@@ -144,6 +151,8 @@ namespace Felina
 			void CreateDescriptorPool();
 			void AllocateDescriptorSets();
 			void CreateSyncObjects();
+			
+			// Ray-tracing and AS
 
 			void DrawObject(const Object& obj, uint32_t& idx);
 			void RecordCommandBuffer(uint32_t imageIndex); // 2 passes
@@ -217,6 +226,9 @@ namespace Felina
 			std::vector<vk::raii::DescriptorSet> m_materialDescriptorSets;
 			// Just one shared between frames because it will be read-only
 			vk::raii::DescriptorSet m_textureDescriptorSets = nullptr;
+
+			// Acceleration structure
+			std::vector<BLAS> m_blas;
 
 			std::vector<vk::raii::Semaphore> m_imageAvailableSemaphores;
 			std::vector<vk::raii::Semaphore> m_renderFinishedSemaphores;

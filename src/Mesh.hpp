@@ -51,8 +51,9 @@ namespace Felina
 				assert(m_indexBuffer && "Index buffer not initialized");
 				return *m_indexBuffer;
 			};
-			inline size_t GetIndexBufferSize() const { return m_indices.size(); };
+			inline size_t GetIndexCount() const { return m_indices.size(); };
 			inline vk::IndexType GetIndexType() const { return vk::IndexType::eUint32; };
+			inline size_t GetVertexCount() const { return m_vertices.size(); };
 
 			inline void SetMaterial(MaterialID newMaterial) { m_material = newMaterial; };
 			inline MaterialID GetMaterial() const { return m_material; };

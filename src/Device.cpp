@@ -129,6 +129,18 @@ namespace Felina
         m_graphicsQueue.waitIdle();
     }
 
+    vk::raii::CommandBuffer Device::CreateTransientCommandBuffer()
+    {
+        vk::CommandBufferAllocateInfo allocInfo {
+            .commandPool = m_immediateCommandPool,
+            .level = vk::CommandBufferLevel::ePrimary,
+            .commandBufferCount = 1
+        };
+
+        // NOTE: ownership will be moved to the caller
+        return std::move(m_device.allocateCommandBuffers(allocInfo).front());
+    }
+
     void Device::SelectPhysicalDevice(vk::raii::Instance& instance, const vk::raii::SurfaceKHR& surface)
     {
         for (const auto& physicalDevice : vk::raii::PhysicalDevices(instance))
@@ -211,15 +223,19 @@ namespace Felina
         // Create a chain of feature structures to enable multiple new FEATURES (on top of those of Vulkan 1.0) all at once
         vk::StructureChain<
             vk::PhysicalDeviceFeatures2,
+            vk::PhysicalDeviceVulkan12Features,
             vk::PhysicalDeviceVulkan13Features,
             vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
-            vk::PhysicalDeviceRobustness2FeaturesKHR
+            vk::PhysicalDeviceRobustness2FeaturesKHR,
+            vk::PhysicalDeviceAccelerationStructureFeaturesKHR
         > // To be able to change dinamically some pipeline properties
             featureChain = {
                 {},
+                { .bufferDeviceAddress = true },
                 {.synchronization2 = true, .dynamicRendering = true},
                 {.extendedDynamicState = true},
-                { .nullDescriptor = true }
+                { .nullDescriptor = true },
+                { .accelerationStructure = true }
         };
 
         // Required device EXTENSIONS
@@ -228,15 +244,15 @@ namespace Felina
             // Mandatory extension for presenting framebuffer on a window
             vk::KHRSwapchainExtensionName,
 
-            // Vulkan tutorial extensions (I guess I'll understand what they are here for, at some point)
+            // Vulkan tutorial extensions
             vk::KHRSpirv14ExtensionName,
             vk::KHRSynchronization2ExtensionName,
             vk::KHRCreateRenderpass2ExtensionName,
             vk::KHRShaderDrawParametersExtensionName, // Required to be able to use SV_VertexID in shader code
 
-            // Raytracing extensions (for the future)
-            //vk::KHRAccelerationStructureExtensionName,
-            //vk::KHRDeferredHostOperationsExtensionName, // Required by the extension above
+            // RT-related extensions
+            vk::KHRAccelerationStructureExtensionName,
+            vk::KHRDeferredHostOperationsExtensionName, // Required by the extension above
             //vk::KHRRayTracingPipelineExtensionName,
             //vk::KHRRayQueryExtensionName
         };
@@ -268,10 +284,11 @@ namespace Felina
     {
         VmaAllocatorCreateInfo allocatorCreateInfo
         {
+            .flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
             .physicalDevice = *m_physicalDevice,
             .device = *m_device,
             .instance = *instance,
-            .vulkanApiVersion = vk::ApiVersion14 // TODO: remove this hardcoded api version
+            .vulkanApiVersion = vk::ApiVersion14, // TODO: remove this hardcoded api version
         };
         vmaCreateAllocator(&allocatorCreateInfo, &m_allocator);
     }

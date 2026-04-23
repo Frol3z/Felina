@@ -16,6 +16,7 @@ namespace Felina
 
 			void CopyBuffer(const Buffer& srcBuffer, const Buffer& dstBuffer, vk::DeviceSize size);
 			void CopyBufferToImage(const Buffer& src, const Texture& dst, vk::DeviceSize size);
+			vk::raii::CommandBuffer CreateTransientCommandBuffer();
 
 			const vk::raii::Device& GetDevice() const { return m_device; }
 			const vk::raii::PhysicalDevice& GetPhysicalDevice() const { return m_physicalDevice; }

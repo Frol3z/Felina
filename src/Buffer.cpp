@@ -46,4 +46,10 @@ namespace Felina
 			vmaUnmapMemory(m_allocator, m_allocation);
 		}
 	}
+
+	vk::DeviceAddress Buffer::GetDeviceAddress(Device& device) const
+	{
+		vk::BufferDeviceAddressInfo addressInfo { .buffer = m_buffer };
+		return device.GetDevice().getBufferAddress(addressInfo);
+	}
 }

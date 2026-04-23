@@ -50,6 +50,8 @@ namespace Felina
 		InitImGui();
 		LoadScene();
 
+		m_renderer->BuildAccelerationStructure();
+
 		LOG("[Application] Done.");
 	}
 

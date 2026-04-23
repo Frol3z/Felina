@@ -1264,6 +1264,118 @@ namespace Felina
         }
     }
 
+    void Renderer::BuildAccelerationStructure()
+    {
+        // NOTE: 1 BLAS - 1 mesh
+
+        const auto& meshes = ResourceManager::GetInstance().GetMeshes();
+        vk::raii::CommandBuffer cmd = m_device->CreateTransientCommandBuffer();
+        
+        uint32_t i = 0;
+        std::vector<std::unique_ptr<Buffer>> scratchBuffers; // local scope!
+        scratchBuffers.reserve(meshes.size());
+        
+        cmd.begin({ .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
+
+        for (const auto& [id, res] : meshes)
+        {
+             const Mesh& mesh = *res.resource;
+             const uint32_t vertexCount = static_cast<uint32_t>(mesh.GetVertexCount() - 1);
+             const uint32_t primitiveCount = mesh.GetIndexCount() / 3;
+             
+             auto trianglesData = vk::AccelerationStructureGeometryTrianglesDataKHR{
+                .vertexFormat = Vertex::GetAttributeDescriptions()[0].format, // vertex.pos VkFormat
+                .vertexData = mesh.GetVertexBuffer().GetDeviceAddress(*m_device),
+                .vertexStride = sizeof(Vertex),
+                .maxVertex = vertexCount,
+                .indexType = mesh.GetIndexType(),
+                .indexData = mesh.GetIndexBuffer().GetDeviceAddress(*m_device)
+             };
+             vk::AccelerationStructureGeometryDataKHR geometryData(trianglesData);
+             vk::AccelerationStructureGeometryKHR blasGeometry{
+                 .geometryType = vk::GeometryTypeKHR::eTriangles,
+                 .geometry = geometryData,
+                 .flags = vk::GeometryFlagBitsKHR::eOpaque
+             };
+
+             // BLAS
+             vk::AccelerationStructureBuildGeometryInfoKHR blasBuildGeometryInfo{
+                 .type = vk::AccelerationStructureTypeKHR::eBottomLevel,
+                 .flags = vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace,
+                 .mode = vk::BuildAccelerationStructureModeKHR::eBuild,
+                 .geometryCount = 1,
+                 .pGeometries = &blasGeometry
+             };
+
+             // Query for BLAS memory requirements
+             vk::AccelerationStructureBuildSizesInfoKHR blasBuildSizes = m_device->GetDevice().getAccelerationStructureBuildSizesKHR(
+                 vk::AccelerationStructureBuildTypeKHR::eDevice,
+                 blasBuildGeometryInfo,
+                 { primitiveCount }
+             );
+
+             // Create BLAS buffer
+             vk::BufferCreateInfo bufferInfo {
+                 .size = blasBuildSizes.accelerationStructureSize,
+                 .usage = vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress
+             };
+             VmaAllocationCreateInfo allocInfo{};
+             allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+             auto blasBuffer = std::make_unique<Buffer>(m_device->GetAllocator(), bufferInfo, allocInfo);
+
+             // Create BLAS scratch buffer
+             vk::BufferCreateInfo scratchInfo{
+                .size = blasBuildSizes.buildScratchSize,
+                .usage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eShaderDeviceAddress
+             };
+             VmaAllocationCreateInfo scratchAllocInfo{};
+             scratchAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+             scratchBuffers.push_back(std::make_unique<Buffer>(m_device->GetAllocator(), scratchInfo, scratchAllocInfo));
+
+             // Get BLAS handle
+             vk::AccelerationStructureCreateInfoKHR blasCreateInfo{
+                 .buffer = blasBuffer->GetHandle(),
+                 .offset = 0,
+                 .size = blasBuildSizes.accelerationStructureSize,
+                 .type = vk::AccelerationStructureTypeKHR::eBottomLevel
+             };
+             vk::raii::AccelerationStructureKHR blas = m_device->GetDevice().createAccelerationStructureKHR(blasCreateInfo);
+
+             // Save BLAS handle and storage buffer persistently
+             m_blas.emplace_back(BLAS { 
+                 std::move(blas), std::move(blasBuffer)
+             });
+
+             // Update build geometry info with handle and scratch buffer address
+             blasBuildGeometryInfo.scratchData.deviceAddress = scratchBuffers.back()->GetDeviceAddress(*m_device);
+             blasBuildGeometryInfo.dstAccelerationStructure = m_blas.back().handle;
+
+             // Record commands
+             vk::AccelerationStructureBuildRangeInfoKHR blasRangeInfo{
+                 .primitiveCount = primitiveCount,
+                 .primitiveOffset = 0,
+                 .firstVertex = 0,
+                 .transformOffset = 0
+             };
+             cmd.buildAccelerationStructuresKHR({ blasBuildGeometryInfo }, { &blasRangeInfo });
+        }
+
+        // TODO: add barrier to synchronize
+
+        // TODO: TLAS
+        
+        // Submit command buffer
+        cmd.end();
+
+        vk::SubmitInfo submitInfo{
+            .commandBufferCount = 1,
+            .pCommandBuffers = &*cmd
+        };
+        auto queue = m_device->GetGraphicsQueue();
+        queue.submit(submitInfo);
+        queue.waitIdle();
+    }
+
     void Renderer::DrawObject(const Object& obj, uint32_t& idx)
     {
         // TODO: improve invalid ResourceIDs handling
@@ -1293,7 +1405,7 @@ namespace Felina
             m_commandBuffers[m_currentFrame].bindIndexBuffer(mesh.GetIndexBuffer().GetHandle(), 0, mesh.GetIndexType());
 
             // Draw call
-            m_commandBuffers[m_currentFrame].drawIndexed(mesh.GetIndexBufferSize(), 1, 0, 0, 0);
+            m_commandBuffers[m_currentFrame].drawIndexed(mesh.GetIndexCount(), 1, 0, 0, 0);
         }
 
         // Increment index AFTER drawing the object
