@@ -1266,15 +1266,25 @@ namespace Felina
 
     void Renderer::BuildAccelerationStructure()
     {
-        // NOTE: 1 BLAS - 1 mesh
+        // TODO: refactor
+        // TODO: update instances transform before rendering
 
+        // NOTE: 1 BLAS <-> 1 mesh
+        m_blas.clear();
         const auto& meshes = ResourceManager::GetInstance().GetMeshes();
         vk::raii::CommandBuffer cmd = m_device->CreateTransientCommandBuffer();
         
         uint32_t i = 0;
         std::vector<std::unique_ptr<Buffer>> scratchBuffers; // local scope!
         scratchBuffers.reserve(meshes.size());
-        
+        std::vector<vk::AccelerationStructureInstanceKHR> instances; // local scope!
+        instances.reserve(meshes.size());
+    
+        vk::TransformMatrixKHR identityTransform{};
+        identityTransform.matrix[0][0] = 1.0f;
+        identityTransform.matrix[1][1] = 1.0f;
+        identityTransform.matrix[2][2] = 1.0f;
+
         cmd.begin({ .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
 
         for (const auto& [id, res] : meshes)
@@ -1283,6 +1293,7 @@ namespace Felina
              const uint32_t vertexCount = static_cast<uint32_t>(mesh.GetVertexCount() - 1);
              const uint32_t primitiveCount = mesh.GetIndexCount() / 3;
              
+             // BLAS geometry data
              auto trianglesData = vk::AccelerationStructureGeometryTrianglesDataKHR{
                 .vertexFormat = Vertex::GetAttributeDescriptions()[0].format, // vertex.pos VkFormat
                 .vertexData = mesh.GetVertexBuffer().GetDeviceAddress(*m_device),
@@ -1298,7 +1309,7 @@ namespace Felina
                  .flags = vk::GeometryFlagBitsKHR::eOpaque
              };
 
-             // BLAS
+             // BLAS build info
              vk::AccelerationStructureBuildGeometryInfoKHR blasBuildGeometryInfo{
                  .type = vk::AccelerationStructureTypeKHR::eBottomLevel,
                  .flags = vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace,
@@ -1342,13 +1353,11 @@ namespace Felina
              vk::raii::AccelerationStructureKHR blas = m_device->GetDevice().createAccelerationStructureKHR(blasCreateInfo);
 
              // Save BLAS handle and storage buffer persistently
-             m_blas.emplace_back(BLAS { 
-                 std::move(blas), std::move(blasBuffer)
-             });
+             const auto& [it, ok] = m_blas.emplace(std::pair<MeshID, BLAS>(id, BLAS{ std::move(blas), std::move(blasBuffer) }));
 
              // Update build geometry info with handle and scratch buffer address
              blasBuildGeometryInfo.scratchData.deviceAddress = scratchBuffers.back()->GetDeviceAddress(*m_device);
-             blasBuildGeometryInfo.dstAccelerationStructure = m_blas.back().handle;
+             blasBuildGeometryInfo.dstAccelerationStructure = it->second.handle;
 
              // Record commands
              vk::AccelerationStructureBuildRangeInfoKHR blasRangeInfo{
@@ -1360,9 +1369,110 @@ namespace Felina
              cmd.buildAccelerationStructuresKHR({ blasBuildGeometryInfo }, { &blasRangeInfo });
         }
 
-        // TODO: add barrier to synchronize
+        // TODO: add barrier for robustness
+        
+        // Traverse the scene hierarchy and build per-mesh TLAS instances
+        for (const auto& obj : m_scene.GetObjects())
+        {
+            Scene::Traverse(*obj, glm::mat4(1.0f),
+                [&](const Object& obj, const glm::mat4& parent) 
+                {
+                    for (MeshID mesh : obj.GetMeshes())
+                    {
+                        // Retrieve BLAS for each object mesh
+                        const auto& blas = m_blas.at(mesh).handle;
 
-        // TODO: TLAS
+                        // Create TLAS instance for the current BLAS
+                        vk::AccelerationStructureDeviceAddressInfoKHR addrInfo{
+                           .accelerationStructure = blas
+                        };
+                        vk::DeviceAddress blasDeviceAddress = m_device->GetDevice().getAccelerationStructureAddressKHR(addrInfo);
+                        vk::AccelerationStructureInstanceKHR instance{
+                            .transform = identityTransform,
+                            .mask = 0xFF,
+                            .accelerationStructureReference = blasDeviceAddress
+                        };
+                        instances.push_back(instance);
+                    }
+                });
+        }
+
+        // Create GPU instance data buffer and transfer data from the CPU
+        vk::BufferCreateInfo instanceDataBufferInfo {
+            .size = sizeof(vk::AccelerationStructureInstanceKHR) * instances.size(),
+            .usage = vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress
+        };
+        VmaAllocationCreateInfo instanceDataAllocInfo{};
+        instanceDataAllocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+        m_tlas.instances = std::make_unique<Buffer>(m_device->GetAllocator(), instanceDataBufferInfo, instanceDataAllocInfo);
+        m_tlas.instances->LoadData(instances.data(), sizeof(vk::AccelerationStructureInstanceKHR)* instances.size());
+
+        // TLAS geometry data
+        vk::AccelerationStructureGeometryInstancesDataKHR instanceData {
+            .arrayOfPointers = vk::False,
+            .data = m_tlas.instances->GetDeviceAddress(*m_device)
+        };
+        vk::AccelerationStructureGeometryDataKHR geometryData(instanceData);
+        vk::AccelerationStructureGeometryKHR tlasGeometry {
+            .geometryType = vk::GeometryTypeKHR::eInstances,
+            .geometry = geometryData
+        };
+
+        // TLAS build info
+        vk::AccelerationStructureBuildGeometryInfoKHR tlasBuildGeometryInfo {
+            .type = vk::AccelerationStructureTypeKHR::eTopLevel,
+            .mode = vk::BuildAccelerationStructureModeKHR::eBuild,
+            .geometryCount = 1,
+            .pGeometries = &tlasGeometry
+        };
+
+        // Query for TLAS memory requirements
+        vk::AccelerationStructureBuildSizesInfoKHR tlasBuildSizes = 
+            m_device->GetDevice().getAccelerationStructureBuildSizesKHR(
+                vk::AccelerationStructureBuildTypeKHR::eDevice,
+                tlasBuildGeometryInfo,
+                { static_cast<uint32_t>(instances.size()) }
+        );
+
+        // Create TLAS buffer
+        vk::BufferCreateInfo bufferInfo {
+            .size = tlasBuildSizes.accelerationStructureSize,
+            .usage = vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress
+        };
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+        m_tlas.buffer = std::make_unique<Buffer>(m_device->GetAllocator(), bufferInfo, allocInfo);
+
+        // Create TLAS scratch buffer
+        vk::BufferCreateInfo scratchInfo{
+           .size = std::max(tlasBuildSizes.buildScratchSize, tlasBuildSizes.updateScratchSize),
+           .usage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eShaderDeviceAddress
+        };
+        VmaAllocationCreateInfo scratchAllocInfo{};
+        scratchAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+        m_tlas.scratch = std::make_unique<Buffer>(m_device->GetAllocator(), scratchInfo, scratchAllocInfo);
+
+        // Get TLAS handle
+        vk::AccelerationStructureCreateInfoKHR tlasCreateInfo {
+            .buffer = m_tlas.buffer->GetHandle(),
+            .offset = 0,
+            .size = tlasBuildSizes.accelerationStructureSize,
+            .type = vk::AccelerationStructureTypeKHR::eTopLevel
+        };
+        m_tlas.handle = m_device->GetDevice().createAccelerationStructureKHR(tlasCreateInfo);
+
+        // Update build geometry info with handle and scratch buffer address
+        tlasBuildGeometryInfo.scratchData.deviceAddress = m_tlas.scratch->GetDeviceAddress(*m_device);
+        tlasBuildGeometryInfo.dstAccelerationStructure = m_tlas.handle.value();
+
+        // Record commands
+        vk::AccelerationStructureBuildRangeInfoKHR tlasRangeInfo{
+            .primitiveCount = static_cast<uint32_t>(instances.size()),
+            .primitiveOffset = 0,
+            .firstVertex = 0,
+            .transformOffset = 0
+        };
+        cmd.buildAccelerationStructuresKHR({ tlasBuildGeometryInfo }, { &tlasRangeInfo });
         
         // Submit command buffer
         cmd.end();
@@ -1374,6 +1484,11 @@ namespace Felina
         auto queue = m_device->GetGraphicsQueue();
         queue.submit(submitInfo);
         queue.waitIdle();
+    }
+
+    void Renderer::UpdateAccelerationStructure()
+    {
+        // TODO:
     }
 
     void Renderer::DrawObject(const Object& obj, uint32_t& idx)

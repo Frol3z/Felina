@@ -88,10 +88,19 @@ namespace Felina
 				glm::mat4 view;
 			};
 
+			// TODO: consider grouping the two AS structures below
 			struct BLAS
 			{
 				vk::raii::AccelerationStructureKHR handle;
-				std::unique_ptr<Buffer> storageBuffer;
+				std::unique_ptr<Buffer> buffer;
+			};
+
+			struct TLAS
+			{
+				std::optional<vk::raii::AccelerationStructureKHR> handle;
+				std::unique_ptr<Buffer> buffer;
+				std::unique_ptr<Buffer> scratch;
+				std::unique_ptr<Buffer> instances;
 			};
 
 			// Max number of descriptor sets PER FRAME
@@ -153,6 +162,7 @@ namespace Felina
 			void CreateSyncObjects();
 			
 			// Ray-tracing and AS
+			void UpdateAccelerationStructure();
 
 			void DrawObject(const Object& obj, uint32_t& idx);
 			void RecordCommandBuffer(uint32_t imageIndex); // 2 passes
@@ -228,7 +238,8 @@ namespace Felina
 			vk::raii::DescriptorSet m_textureDescriptorSets = nullptr;
 
 			// Acceleration structure
-			std::vector<BLAS> m_blas;
+			std::unordered_map<MeshID, BLAS> m_blas;
+			TLAS m_tlas;
 
 			std::vector<vk::raii::Semaphore> m_imageAvailableSemaphores;
 			std::vector<vk::raii::Semaphore> m_renderFinishedSemaphores;

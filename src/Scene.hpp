@@ -16,6 +16,17 @@ namespace Felina
 			Scene(float viewportWidth, float viewportHeight);
 			~Scene();
 
+			template <typename Fn>
+			static void Traverse(const Object& obj, const glm::mat4& parent, Fn&& fn)
+			{
+				glm::mat4 model = parent * obj.GetModelMatrix();
+
+				fn(obj, model);
+
+				for (const auto& child : obj.GetChildren())
+					Traverse(*child, model, fn);
+			}
+
 			Camera& GetCamera() { return m_camera; }
 			const Camera& GetCamera() const { return m_camera; }
 
